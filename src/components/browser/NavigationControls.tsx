@@ -1,4 +1,4 @@
-import { goBack, goForward, reloadPage, navigateTo } from "../../lib/ipc";
+import { goBack, goForward, reloadPage, createTab } from "../../lib/ipc";
 
 export function NavigationControls() {
   const handleBack = () => {
@@ -14,7 +14,7 @@ export function NavigationControls() {
   };
 
   const handleHome = () => {
-    navigateTo("https://duckduckgo.com").catch(console.error);
+    createTab("https://duckduckgo.com").catch(console.error);
   };
 
   return (
