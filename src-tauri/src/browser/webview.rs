@@ -240,7 +240,7 @@ fn setup_request_interception<R: Runtime>(
                                 let mut uri = PWSTR::null();
                                 request.Uri(&mut uri)
                                     .map_err(|e| format!("Failed to get URI: {e}"))?;
-                                uri.to_string()
+                                uri.to_string().unwrap_or_default()
                             };
 
                             // Skip non-HTTP requests and data URIs
@@ -253,9 +253,11 @@ fn setup_request_interception<R: Runtime>(
                             // Get the page URL from the sender webview as source_url
                             let source_url = if let Some(ref sender) = sender {
                                 let mut url = PWSTR::null();
-                                unsafe { sender.Source(&mut url) }
-                                    .map(|_| url.to_string())
-                                    .unwrap_or_default()
+                                if unsafe { sender.Source(&mut url) }.is_ok() {
+                                    url.to_string().unwrap_or_default()
+                                } else {
+                                    String::new()
+                                }
                             } else {
                                 String::new()
                             };
