@@ -10,10 +10,12 @@ import {
   closeTabAction,
   switchToTab,
 } from "./stores/tabStore";
+import { initializePrivacyStore } from "./stores/privacyStore";
 
 function App() {
   onMount(() => {
     initializeTabStore();
+    initializePrivacyStore();
   });
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────

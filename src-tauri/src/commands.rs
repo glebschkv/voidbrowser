@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::browser::navigation;
 use crate::browser::tabs::{Tab, TabInfo, TabManager};
 use crate::browser::webview;
+use crate::privacy::ad_blocker::ShieldState;
 
 /// Helper: get the webview label for a tab id.
 fn webview_label(tab_id: &str) -> String {
@@ -265,5 +266,28 @@ pub async fn get_current_url<R: Runtime>(app: AppHandle<R>) -> Result<String, St
 
     let url = webview.url().map_err(|e| e.to_string())?;
     Ok(url.to_string())
+}
+
+// ── Privacy commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_blocked_count<R: Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<u64, String> {
+    let shield = app.state::<Arc<Mutex<ShieldState>>>();
+    let state = shield.lock().map_err(|e| e.to_string())?;
+    Ok(state.get_count(&tab_id))
+}
+
+#[tauri::command]
+pub async fn toggle_shield<R: Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+) -> Result<bool, String> {
+    let shield = app.state::<Arc<Mutex<ShieldState>>>();
+    let mut state = shield.lock().map_err(|e| e.to_string())?;
+    let enabled = state.toggle(&tab_id);
+    Ok(enabled)
 }
 
