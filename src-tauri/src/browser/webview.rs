@@ -253,6 +253,7 @@ fn setup_request_interception<R: Runtime>(
                 let shield = Arc::clone(&*shield);
                 let app_for_emit = app_handle.clone();
 
+                let tab_id_for_log = tab_id.clone();
                 let handler = WebResourceRequestedEventHandler::create(Box::new(
                     move |sender: Option<ICoreWebView2>,
                           args: Option<
@@ -268,14 +269,14 @@ fn setup_request_interception<R: Runtime>(
                             };
 
                             // Get the request URL — if this fails, let the request through
-                            let request = match unsafe { args.Request() } {
+                            let request = match args.Request() {
                                 Ok(r) => r,
                                 Err(e) => {
                                     eprintln!("[AdBlock] Failed to get request: {e}");
                                     return;
                                 }
                             };
-                            let url_str = unsafe {
+                            let url_str = {
                                 let mut uri = PWSTR::null();
                                 match request.Uri(&mut uri) {
                                     Ok(()) => pwstr_to_string_safe(uri),
@@ -295,20 +296,18 @@ fn setup_request_interception<R: Runtime>(
 
                             // Get the page URL from the sender webview as source_url
                             let source_url = if let Some(ref sender) = sender {
-                                unsafe {
-                                    let mut url = PWSTR::null();
-                                    if sender.Source(&mut url).is_ok() {
-                                        pwstr_to_string_safe(url)
-                                    } else {
-                                        String::new()
-                                    }
+                                let mut url = PWSTR::null();
+                                if sender.Source(&mut url).is_ok() {
+                                    pwstr_to_string_safe(url)
+                                } else {
+                                    String::new()
                                 }
                             } else {
                                 String::new()
                             };
 
                             // Map WebView2 resource context to adblock resource type string
-                            let resource_type = unsafe {
+                            let resource_type = {
                                 let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                                 if args.ResourceContext(&mut ctx).is_ok() {
                                     map_resource_context(ctx)
@@ -352,14 +351,12 @@ fn setup_request_interception<R: Runtime>(
 
                             // Create an empty 204 No Content response to block the request.
                             // If anything fails here, let the request through.
-                            let response = match unsafe {
-                                env.CreateWebResourceResponse(
-                                    None, // no content stream
-                                    204,
-                                    &HSTRING::from("No Content"),
-                                    &HSTRING::from(""),
-                                )
-                            } {
+                            let response = match env.CreateWebResourceResponse(
+                                None, // no content stream
+                                204,
+                                &HSTRING::from("No Content"),
+                                &HSTRING::from(""),
+                            ) {
                                 Ok(r) => r,
                                 Err(e) => {
                                     eprintln!(
@@ -369,7 +366,7 @@ fn setup_request_interception<R: Runtime>(
                                 }
                             };
 
-                            if let Err(e) = unsafe { args.SetResponse(&response) } {
+                            if let Err(e) = args.SetResponse(&response) {
                                 eprintln!("[AdBlock] Failed to set response: {e}");
                                 return;
                             }
@@ -402,7 +399,7 @@ fn setup_request_interception<R: Runtime>(
                     return;
                 }
 
-                eprintln!("[AdBlock] Request interception active for tab {tab_id}");
+                eprintln!("[AdBlock] Request interception active for tab {tab_id_for_log}");
             }));
 
             if let Err(_) = result {
