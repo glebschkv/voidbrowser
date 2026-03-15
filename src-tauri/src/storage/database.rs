@@ -16,7 +16,24 @@ impl Database {
     /// The key is stored in the OS keychain with a file-based fallback.
     pub fn open(app_data_dir: &Path) -> Result<Self, String> {
         let key = crypto::get_or_create_vault_key(app_data_dir)?;
-        Self::open_with_key(app_data_dir, &key)
+        match Self::open_with_key(app_data_dir, &key) {
+            Ok(db) => Ok(db),
+            Err(e) if e.contains("key verification failed") => {
+                // The vault.db exists but the key doesn't match (e.g. the
+                // keyring entry was lost, or the file is from a different
+                // install).  Delete the stale database and start fresh.
+                eprintln!(
+                    "Vault key mismatch — deleting stale vault.db and creating a new one"
+                );
+                let db_path = app_data_dir.join("vault.db");
+                let _ = std::fs::remove_file(&db_path);
+                // Also remove WAL/SHM sidecars if present
+                let _ = std::fs::remove_file(app_data_dir.join("vault.db-wal"));
+                let _ = std::fs::remove_file(app_data_dir.join("vault.db-shm"));
+                Self::open_with_key(app_data_dir, &key)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Open the database with an explicit key (used by tests to avoid
