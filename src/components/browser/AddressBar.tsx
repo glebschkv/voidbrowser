@@ -1,6 +1,6 @@
 import { createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { navigateTo, getCurrentUrl } from "../../lib/ipc";
+import { navigateTo, getCurrentUrl, setSettingsOpen } from "../../lib/ipc";
 import { tabState } from "../../stores/tabStore";
 import { ShieldIcon } from "../privacy/ShieldIcon";
 import {
@@ -58,6 +58,8 @@ export function AddressBar() {
     setEditValue(url());
     setSelectedIndex(-1);
     setTimeout(() => inputRef?.select(), 0);
+    // Hide the content webview so the autocomplete dropdown is visible
+    setSettingsOpen(true).catch(console.error);
   };
 
   const handleBlur = () => {
@@ -66,6 +68,8 @@ export function AddressBar() {
       setIsEditing(false);
       clearSuggestions();
       setSelectedIndex(-1);
+      // Show the content webview again
+      setSettingsOpen(false).catch(console.error);
     }, 150);
   };
 
