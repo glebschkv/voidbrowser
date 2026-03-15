@@ -76,6 +76,7 @@ impl SessionHistory {
             .collect()
     }
 
+    #[allow(dead_code)] // Used in Phase 7 for explicit history clearing
     pub fn clear(&mut self) {
         self.entries.clear();
     }
