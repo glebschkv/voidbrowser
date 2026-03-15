@@ -12,6 +12,8 @@ pub struct HttpsOnlyState {
     /// Tracks tab IDs that have a pending HTTPS warning page displayed.
     /// Maps tab_id -> original HTTP URL.
     pending_warnings: HashMap<String, String>,
+    /// Total HTTPS upgrades across all tabs this session.
+    total_upgrades: u64,
 }
 
 #[allow(dead_code)]
@@ -21,6 +23,7 @@ impl HttpsOnlyState {
             allowed_http_domains: HashSet::new(),
             upgrade_counts: HashMap::new(),
             pending_warnings: HashMap::new(),
+            total_upgrades: 0,
         }
     }
 
@@ -38,12 +41,18 @@ impl HttpsOnlyState {
     pub fn record_upgrade(&mut self, tab_id: &str) -> u64 {
         let count = self.upgrade_counts.entry(tab_id.to_string()).or_insert(0);
         *count += 1;
+        self.total_upgrades += 1;
         *count
     }
 
     /// Get the number of HTTPS upgrades for a tab.
     pub fn get_upgrade_count(&self, tab_id: &str) -> u64 {
         self.upgrade_counts.get(tab_id).copied().unwrap_or(0)
+    }
+
+    /// Get total HTTPS upgrades across all tabs this session.
+    pub fn get_total_upgrades(&self) -> u64 {
+        self.total_upgrades
     }
 
     /// Reset upgrade count for a tab (on new navigation).

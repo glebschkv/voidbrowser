@@ -118,13 +118,14 @@ pub async fn switch_tab<R: Runtime>(
     tab_id: String,
 ) -> Result<(), String> {
     let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
-    let prev_id = {
+    let (prev_id, tab_title) = {
         let mut mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
         let prev = mgr.active_tab_id.clone();
         if !mgr.set_active(&tab_id) {
             return Err(format!("Tab not found: {tab_id}"));
         }
-        prev
+        let title = mgr.get_tab(&tab_id).map(|t| t.title.clone()).unwrap_or_default();
+        (prev, title)
     };
 
     // Hide previous, show new
@@ -140,6 +141,16 @@ pub async fn switch_tab<R: Runtime>(
     let new_label = webview_label(&tab_id);
     if let Some(wv) = app.get_webview(&new_label) {
         let _ = wv.show();
+    }
+
+    // Update window title to reflect the new active tab
+    if let Some(window) = app.get_window("main") {
+        let window_title = if tab_title.is_empty() {
+            "VoidBrowser".to_string()
+        } else {
+            format!("{tab_title} \u{2014} VoidBrowser")
+        };
+        let _ = window.set_title(&window_title);
     }
 
     let _ = app.emit("active-tab-changed", &tab_id);
@@ -539,5 +550,311 @@ pub async fn handle_keyboard_shortcut<R: Runtime>(
 ) -> Result<(), String> {
     let _ = app.emit("menu-shortcut", &key);
     Ok(())
+}
+
+// ── Privacy stats commands ──────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyStats {
+    pub total_blocked: u64,
+    pub total_upgrades: u64,
+    pub top_blocked_domains: Vec<(String, u64)>,
+}
+
+#[tauri::command]
+pub async fn get_privacy_stats<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<PrivacyStats, String> {
+    let shield = app.state::<Arc<Mutex<ShieldState>>>();
+    let shield_state = shield.lock().map_err(|e| e.to_string())?;
+
+    let https_state_arc = app.state::<Arc<Mutex<HttpsOnlyState>>>();
+    let https_state = https_state_arc.lock().map_err(|e| e.to_string())?;
+
+    Ok(PrivacyStats {
+        total_blocked: shield_state.get_total_blocked(),
+        total_upgrades: https_state.get_total_upgrades(),
+        top_blocked_domains: shield_state.get_top_blocked_domains(10),
+    })
+}
+
+// ── Find-in-page commands ───────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindResult {
+    pub total_matches: u32,
+    pub current_index: u32,
+}
+
+#[tauri::command]
+pub async fn find_in_page<R: Runtime>(
+    app: AppHandle<R>,
+    query: String,
+) -> Result<FindResult, String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    let escaped_query = query
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
+
+    let script = format!(
+        r#"(function() {{
+            // Clear previous highlights
+            if (window.__VOID_FIND__) {{
+                window.__VOID_FIND__.clear();
+            }}
+
+            var query = '{}';
+            if (!query) return JSON.stringify({{ totalMatches: 0, currentIndex: 0 }});
+
+            var marks = [];
+            var currentIdx = 0;
+
+            function clear() {{
+                marks.forEach(function(mark) {{
+                    var parent = mark.parentNode;
+                    if (parent) {{
+                        parent.replaceChild(document.createTextNode(mark.textContent), mark);
+                        parent.normalize();
+                    }}
+                }});
+                marks = [];
+                currentIdx = 0;
+            }}
+
+            function highlightAll() {{
+                var walker = document.createTreeWalker(
+                    document.body,
+                    NodeFilter.SHOW_TEXT,
+                    null
+                );
+                var textNodes = [];
+                while (walker.nextNode()) {{
+                    var node = walker.currentNode;
+                    if (node.parentElement &&
+                        !['SCRIPT','STYLE','NOSCRIPT','TEXTAREA','INPUT'].includes(node.parentElement.tagName)) {{
+                        textNodes.push(node);
+                    }}
+                }}
+
+                var lowerQuery = query.toLowerCase();
+                for (var i = 0; i < textNodes.length; i++) {{
+                    var node = textNodes[i];
+                    var text = node.textContent;
+                    var lowerText = text.toLowerCase();
+                    var idx = lowerText.indexOf(lowerQuery);
+                    if (idx === -1) continue;
+
+                    var parts = [];
+                    var lastIdx = 0;
+                    while (idx !== -1) {{
+                        if (idx > lastIdx) {{
+                            parts.push(document.createTextNode(text.substring(lastIdx, idx)));
+                        }}
+                        var mark = document.createElement('mark');
+                        mark.textContent = text.substring(idx, idx + query.length);
+                        mark.style.cssText = 'background:#fbbf24;color:#171717;padding:0 1px;border-radius:2px;';
+                        mark.className = '__void_find_mark';
+                        marks.push(mark);
+                        parts.push(mark);
+                        lastIdx = idx + query.length;
+                        idx = lowerText.indexOf(lowerQuery, lastIdx);
+                    }}
+                    if (lastIdx < text.length) {{
+                        parts.push(document.createTextNode(text.substring(lastIdx)));
+                    }}
+
+                    var parent = node.parentNode;
+                    for (var j = 0; j < parts.length; j++) {{
+                        parent.insertBefore(parts[j], node);
+                    }}
+                    parent.removeChild(node);
+                }}
+            }}
+
+            function goTo(idx) {{
+                if (marks.length === 0) return;
+                if (marks[currentIdx]) {{
+                    marks[currentIdx].style.background = '#fbbf24';
+                }}
+                currentIdx = ((idx % marks.length) + marks.length) % marks.length;
+                if (marks[currentIdx]) {{
+                    marks[currentIdx].style.background = '#f97316';
+                    marks[currentIdx].scrollIntoView({{ block: 'center', behavior: 'smooth' }});
+                }}
+            }}
+
+            highlightAll();
+            if (marks.length > 0) goTo(0);
+
+            window.__VOID_FIND__ = {{
+                marks: marks,
+                currentIdx: currentIdx,
+                clear: clear,
+                next: function() {{
+                    this.currentIdx++;
+                    goTo(this.currentIdx);
+                    return JSON.stringify({{ totalMatches: this.marks.length, currentIndex: this.currentIdx }});
+                }},
+                prev: function() {{
+                    this.currentIdx--;
+                    goTo(this.currentIdx);
+                    return JSON.stringify({{ totalMatches: this.marks.length, currentIndex: this.currentIdx }});
+                }},
+                getResult: function() {{
+                    return JSON.stringify({{ totalMatches: this.marks.length, currentIndex: this.currentIdx }});
+                }}
+            }};
+
+            return JSON.stringify({{ totalMatches: marks.length, currentIndex: currentIdx }});
+        }})()"#,
+        escaped_query
+    );
+
+    let result = webview.eval(&script).map_err(|e| e.to_string())?;
+    // eval doesn't return values, so we return a default and let the frontend
+    // use a follow-up call or event. For simplicity, return a placeholder.
+    let _ = result;
+    Ok(FindResult {
+        total_matches: 0,
+        current_index: 0,
+    })
+}
+
+#[tauri::command]
+pub async fn find_next<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval("if (window.__VOID_FIND__) { window.__VOID_FIND__.next(); }")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn find_previous<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval("if (window.__VOID_FIND__) { window.__VOID_FIND__.prev(); }")
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn stop_find_in_page<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval("if (window.__VOID_FIND__) { window.__VOID_FIND__.clear(); window.__VOID_FIND__ = null; }")
+        .map_err(|e| e.to_string())
+}
+
+// ── Zoom commands ───────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn zoom_in<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval(r#"(function(){
+            var z = parseFloat(document.body.style.zoom || '1');
+            z = Math.min(z + 0.1, 3.0);
+            document.body.style.zoom = z;
+        })()"#)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn zoom_out<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval(r#"(function(){
+            var z = parseFloat(document.body.style.zoom || '1');
+            z = Math.max(z - 0.1, 0.3);
+            document.body.style.zoom = z;
+        })()"#)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn zoom_reset<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        active_tab_id(&mgr)?
+    };
+
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "Active tab webview not found".to_string())?;
+
+    webview
+        .eval("document.body.style.zoom = '1';")
+        .map_err(|e| e.to_string())
 }
 

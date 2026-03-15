@@ -157,3 +157,47 @@ export async function setSidebarOpen(open: boolean): Promise<void> {
 export async function setSettingsOpen(open: boolean): Promise<void> {
   return invoke("set_settings_open", { open });
 }
+
+// ── Privacy stats commands ────────────────────────────────────────
+
+export interface PrivacyStats {
+  totalBlocked: number;
+  totalUpgrades: number;
+  topBlockedDomains: [string, number][];
+}
+
+export async function getPrivacyStats(): Promise<PrivacyStats> {
+  return invoke("get_privacy_stats");
+}
+
+// ── Find-in-page commands ─────────────────────────────────────────
+
+export async function findInPage(query: string): Promise<void> {
+  return invoke("find_in_page", { query });
+}
+
+export async function findNext(): Promise<void> {
+  return invoke("find_next");
+}
+
+export async function findPrevious(): Promise<void> {
+  return invoke("find_previous");
+}
+
+export async function stopFindInPage(): Promise<void> {
+  return invoke("stop_find_in_page");
+}
+
+// ── Zoom commands ─────────────────────────────────────────────────
+
+export async function zoomIn(): Promise<void> {
+  return invoke("zoom_in");
+}
+
+export async function zoomOut(): Promise<void> {
+  return invoke("zoom_out");
+}
+
+export async function zoomReset(): Promise<void> {
+  return invoke("zoom_reset");
+}

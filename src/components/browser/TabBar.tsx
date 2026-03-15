@@ -53,6 +53,7 @@ export function TabBar() {
                 title={tab.title}
                 url={tab.url}
                 isActive={tab.id === tabState.activeTabId}
+                isLoading={tab.isLoading}
                 faviconUrl={tab.faviconUrl}
                 onClose={closeTabAction}
                 onSelect={switchToTab}
