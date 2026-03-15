@@ -9,6 +9,7 @@ use super::tabs::TabManager;
 #[cfg(target_os = "windows")]
 use crate::privacy::ad_blocker::AdBlocker;
 use crate::privacy::ad_blocker::ShieldState;
+use crate::privacy::fingerprint::FingerprintShield;
 
 /// Height of the toolbar area in logical pixels (36px tab bar + 46px toolbar).
 pub const TOOLBAR_HEIGHT: f64 = 82.0;
@@ -70,6 +71,10 @@ pub fn create_tab_webview<R: Runtime>(
 
     let mut builder = WebviewBuilder::new(&label, webview_url)
         .auto_resize();
+
+    // Inject fingerprint resistance script into ALL webviews (runs before any page JS)
+    let fp_shield = window.app_handle().state::<FingerprintShield>();
+    builder = builder.initialization_script(&fp_shield.get_injection_script());
 
     // For new tab pages, inject HTML via initialization_script (runs before page content loads)
     if is_new_tab {

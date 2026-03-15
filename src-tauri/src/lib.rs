@@ -9,6 +9,7 @@ use tauri::Manager;
 
 use browser::tabs::{Tab, TabManager};
 use privacy::ad_blocker::{AdBlocker, ShieldState};
+use privacy::fingerprint::FingerprintShield;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,6 +38,11 @@ pub fn run() {
             let elapsed = start.elapsed();
             eprintln!("Ad blocker engine initialized in {elapsed:?}");
             app.manage(Arc::new(Mutex::new(ad_blocker)));
+
+            // Initialize fingerprint resistance (immutable after creation, no Mutex needed)
+            let fp_shield = FingerprintShield::new();
+            eprintln!("Fingerprint shield initialized");
+            app.manage(fp_shield);
 
             let window = app
                 .get_window("main")
