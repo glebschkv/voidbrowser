@@ -1,10 +1,16 @@
 use url::Url;
 
-const DUCKDUCKGO_SEARCH: &str = "https://duckduckgo.com/?q=";
+const DUCKDUCKGO_SEARCH: &str = "https://duckduckgo.com/?q=%s";
 
 /// Determine if the input looks like a URL or a search query, and return
-/// the final URL to navigate to.
+/// the final URL to navigate to.  Uses DuckDuckGo as the default engine.
 pub fn resolve_input(input: &str) -> String {
+    resolve_input_with_engine(input, DUCKDUCKGO_SEARCH)
+}
+
+/// Like [`resolve_input`] but accepts a custom search URL template.
+/// The template must contain `%s` which is replaced with the encoded query.
+pub fn resolve_input_with_engine(input: &str, search_url_template: &str) -> String {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
@@ -29,11 +35,8 @@ pub fn resolve_input(input: &str) -> String {
     }
 
     // Otherwise treat as a search query
-    format!(
-        "{}{}",
-        DUCKDUCKGO_SEARCH,
-        urlencoding_encode(trimmed)
-    )
+    let encoded = urlencoding_encode(trimmed);
+    search_url_template.replace("%s", &encoded)
 }
 
 /// Heuristic: input looks like a URL if it contains a dot,
@@ -126,5 +129,20 @@ mod tests {
     fn test_single_word_is_search() {
         let result = resolve_input("tauri");
         assert!(result.starts_with("https://duckduckgo.com/?q="));
+    }
+
+    #[test]
+    fn test_custom_search_engine() {
+        let result =
+            resolve_input_with_engine("rust lang", "https://www.google.com/search?q=%s");
+        assert!(result.starts_with("https://www.google.com/search?q="));
+        assert!(result.contains("rust"));
+    }
+
+    #[test]
+    fn test_custom_engine_url_passthrough() {
+        let result =
+            resolve_input_with_engine("https://example.com", "https://www.google.com/search?q=%s");
+        assert_eq!(result, "https://example.com");
     }
 }

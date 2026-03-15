@@ -1,6 +1,7 @@
 mod browser;
 mod commands;
 mod privacy;
+mod storage;
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -11,6 +12,8 @@ use browser::tabs::{Tab, TabManager};
 use privacy::ad_blocker::{AdBlocker, ShieldState};
 use privacy::fingerprint::FingerprintShield;
 use privacy::https_only::HttpsOnlyState;
+use storage::database::Database;
+use storage::history::SessionHistory;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,7 +22,9 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(TabManager::new())))
         .manage(Arc::new(Mutex::new(ShieldState::new())))
         .manage(Arc::new(Mutex::new(HttpsOnlyState::new())))
+        .manage(Arc::new(Mutex::new(SessionHistory::new())))
         .invoke_handler(tauri::generate_handler![
+            // Tab management
             commands::navigate_to,
             commands::go_back,
             commands::go_forward,
@@ -30,11 +35,24 @@ pub fn run() {
             commands::switch_tab,
             commands::get_tabs,
             commands::reorder_tabs,
+            // Privacy
             commands::get_blocked_count,
             commands::toggle_shield,
             commands::allow_http_and_navigate,
             commands::toggle_site_shield,
             commands::get_site_shield_status,
+            // Bookmarks
+            commands::add_bookmark,
+            commands::remove_bookmark,
+            commands::get_bookmarks,
+            commands::search_bookmarks,
+            // Settings
+            commands::get_setting,
+            commands::set_setting,
+            commands::get_all_settings,
+            // History
+            commands::search_history,
+            commands::add_history_entry,
         ])
         .setup(|app| {
             // Initialize the ad blocker engine
@@ -48,6 +66,14 @@ pub fn run() {
             let fp_shield = FingerprintShield::new();
             eprintln!("Fingerprint shield initialized");
             app.manage(fp_shield);
+
+            // Initialize encrypted database
+            let data_dir = app.path().app_data_dir().map_err(|e| {
+                format!("Failed to resolve app data directory: {e}")
+            })?;
+            let db = Database::open(&data_dir)?;
+            eprintln!("Encrypted database opened at {}", data_dir.display());
+            app.manage(Arc::new(Mutex::new(db)));
 
             let window = app
                 .get_window("main")

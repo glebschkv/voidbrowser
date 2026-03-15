@@ -3,19 +3,27 @@ import { onMount, onCleanup } from "solid-js";
 import { NavigationControls } from "./components/browser/NavigationControls";
 import { AddressBar } from "./components/browser/AddressBar";
 import { TabBar } from "./components/browser/TabBar";
+import { Sidebar } from "./components/sidebar/Sidebar";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import {
   initializeTabStore,
   tabState,
   createNewTab,
   closeTabAction,
   switchToTab,
+  getActiveTab,
 } from "./stores/tabStore";
 import { initializePrivacyStore } from "./stores/privacyStore";
+import { initializeBookmarkStore, addBookmarkAction } from "./stores/bookmarkStore";
+import { initializeSettingsStore } from "./stores/settingsStore";
+import { toggleSidebar, toggleSettings } from "./stores/sidebarStore";
 
 function App() {
   onMount(() => {
     initializeTabStore();
     initializePrivacyStore();
+    initializeBookmarkStore();
+    initializeSettingsStore();
   });
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────
@@ -40,6 +48,30 @@ function App() {
       e.preventDefault();
       const input = document.querySelector<HTMLInputElement>("[data-address-bar]");
       input?.focus();
+      return;
+    }
+
+    // Ctrl+B — toggle bookmark sidebar
+    if (ctrl && e.key === "b") {
+      e.preventDefault();
+      toggleSidebar();
+      return;
+    }
+
+    // Ctrl+D — bookmark current page
+    if (ctrl && e.key === "d") {
+      e.preventDefault();
+      const activeTab = getActiveTab();
+      if (activeTab && activeTab.url && !activeTab.url.startsWith("void://")) {
+        addBookmarkAction(activeTab.url, activeTab.title || activeTab.url);
+      }
+      return;
+    }
+
+    // Ctrl+, — open settings
+    if (ctrl && e.key === ",") {
+      e.preventDefault();
+      toggleSettings();
       return;
     }
 
@@ -84,6 +116,8 @@ function App() {
         <NavigationControls />
         <AddressBar />
       </div>
+      <Sidebar />
+      <SettingsPage />
     </div>
   );
 }

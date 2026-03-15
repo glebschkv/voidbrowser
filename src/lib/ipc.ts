@@ -83,3 +83,67 @@ export async function toggleSiteShield(domain: string): Promise<boolean> {
 export async function getSiteShieldStatus(domain: string): Promise<boolean> {
   return invoke("get_site_shield_status", { domain });
 }
+
+// ── Bookmark types & commands ───────────────────────────────────────
+
+export interface Bookmark {
+  id: string;
+  url: string;
+  title: string;
+  folder: string | null;
+  faviconData: number[] | null;
+  createdAt: string;
+}
+
+export async function addBookmark(
+  url: string,
+  title: string,
+  folder?: string
+): Promise<Bookmark> {
+  return invoke("add_bookmark", { url, title, folder: folder ?? null });
+}
+
+export async function removeBookmark(id: string): Promise<void> {
+  return invoke("remove_bookmark", { id });
+}
+
+export async function getBookmarks(folder?: string): Promise<Bookmark[]> {
+  return invoke("get_bookmarks", { folder: folder ?? null });
+}
+
+export async function searchBookmarks(query: string): Promise<Bookmark[]> {
+  return invoke("search_bookmarks", { query });
+}
+
+// ── Settings commands ───────────────────────────────────────────────
+
+export async function getSetting(key: string): Promise<string | null> {
+  return invoke("get_setting", { key });
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  return invoke("set_setting", { key, value });
+}
+
+export async function getAllSettings(): Promise<Record<string, string>> {
+  return invoke("get_all_settings");
+}
+
+// ── History commands ────────────────────────────────────────────────
+
+export interface HistoryEntry {
+  url: string;
+  title: string;
+  timestamp: number;
+}
+
+export async function searchHistory(query: string): Promise<HistoryEntry[]> {
+  return invoke("search_history", { query });
+}
+
+export async function addHistoryEntry(
+  url: string,
+  title: string
+): Promise<void> {
+  return invoke("add_history_entry", { url, title });
+}
