@@ -435,6 +435,7 @@ fn map_resource_context(
 fn generate_new_tab_page_script() -> String {
     r#"
     document.addEventListener('DOMContentLoaded', function() {
+        if (window.location.href !== 'about:blank') return;
         document.open();
         document.write('\
 <!DOCTYPE html>\
