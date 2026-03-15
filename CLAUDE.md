@@ -1,6 +1,6 @@
 # CLAUDE.md — VoidBrowser
 
-## CURRENT PHASE: 7
+## CURRENT PHASE: 8
 
 > Read this file top to bottom before writing any code. Build ONLY the current phase. Do not skip ahead. Do not add features from later phases. When a phase is complete, the human will update CURRENT PHASE.
 
