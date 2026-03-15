@@ -193,9 +193,11 @@ pub fn create_tab_webview<R: Runtime>(
             }
 
             // Record navigation in session history
-            let history_state =
-                app_handle_for_history_nav.state::<Arc<Mutex<SessionHistory>>>();
-            if let Ok(mut h) = history_state.lock() {
+            let history_arc = {
+                let s = app_handle_for_history_nav.state::<Arc<Mutex<SessionHistory>>>();
+                Arc::clone(&*s)
+            };
+            if let Ok(mut h) = history_arc.lock() {
                 h.add_entry(&url_str, "");
             }
 
@@ -221,9 +223,11 @@ pub fn create_tab_webview<R: Runtime>(
 
             // Update session history entry title
             if let Some(url) = tab_url {
-                let history_state =
-                    app_handle_for_history_title.state::<Arc<Mutex<SessionHistory>>>();
-                if let Ok(mut h) = history_state.lock() {
+                let history_arc = {
+                    let s = app_handle_for_history_title.state::<Arc<Mutex<SessionHistory>>>();
+                    Arc::clone(&*s)
+                };
+                if let Ok(mut h) = history_arc.lock() {
                     h.update_title(&url, &title);
                 }
             }
