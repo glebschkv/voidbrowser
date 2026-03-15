@@ -57,11 +57,12 @@ impl AdBlocker {
     }
 }
 
-/// Per-tab shield state tracking blocked request counts and disabled tabs.
+/// Per-tab and per-site shield state tracking blocked request counts and disabled tabs/sites.
 #[allow(dead_code)]
 pub struct ShieldState {
     blocked_counts: HashMap<String, u64>,
     disabled_tabs: HashSet<String>,
+    disabled_sites: HashSet<String>,
 }
 
 #[allow(dead_code)]
@@ -70,6 +71,7 @@ impl ShieldState {
         Self {
             blocked_counts: HashMap::new(),
             disabled_tabs: HashSet::new(),
+            disabled_sites: HashSet::new(),
         }
     }
 
@@ -110,6 +112,22 @@ impl ShieldState {
             self.disabled_tabs.insert(tab_id.to_string());
             false
         }
+    }
+
+    /// Toggle the shield for a site domain. Returns `true` if shield is now enabled.
+    pub fn toggle_site(&mut self, domain: &str) -> bool {
+        if self.disabled_sites.contains(domain) {
+            self.disabled_sites.remove(domain);
+            true
+        } else {
+            self.disabled_sites.insert(domain.to_string());
+            false
+        }
+    }
+
+    /// Check whether the shield is disabled for a site domain.
+    pub fn is_site_disabled(&self, domain: &str) -> bool {
+        self.disabled_sites.contains(domain)
     }
 }
 
