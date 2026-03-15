@@ -466,3 +466,78 @@ pub async fn add_history_entry<R: Runtime>(
     Ok(())
 }
 
+// ── Layout commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn set_sidebar_open<R: Runtime>(
+    app: AppHandle<R>,
+    open: bool,
+) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or("Main window not found")?;
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+
+    let logical_width = size.width as f64 / scale;
+    let logical_height = size.height as f64 / scale;
+
+    let sidebar_width = if open { 300.0 } else { 0.0 };
+
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let tab_ids: Vec<String> = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        mgr.tabs.iter().map(|t| t.id.clone()).collect()
+    };
+
+    for tab_id in tab_ids {
+        let label = webview_label(&tab_id);
+        if let Some(wv) = app.get_webview(&label) {
+            let _ = wv.set_position(tauri::LogicalPosition::new(
+                sidebar_width,
+                webview::TOOLBAR_HEIGHT,
+            ));
+            let _ = wv.set_size(tauri::LogicalSize::new(
+                logical_width - sidebar_width,
+                logical_height - webview::TOOLBAR_HEIGHT,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_settings_open<R: Runtime>(
+    app: AppHandle<R>,
+    open: bool,
+) -> Result<(), String> {
+    let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+    let active_id = {
+        let mgr = tab_mgr.lock().map_err(|e| e.to_string())?;
+        mgr.active_tab_id.clone()
+    };
+
+    if let Some(tab_id) = active_id {
+        let label = webview_label(&tab_id);
+        if let Some(wv) = app.get_webview(&label) {
+            if open {
+                let _ = wv.hide();
+            } else {
+                let _ = wv.show();
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn handle_keyboard_shortcut<R: Runtime>(
+    app: AppHandle<R>,
+    key: String,
+) -> Result<(), String> {
+    let _ = app.emit("menu-shortcut", &key);
+    Ok(())
+}
+

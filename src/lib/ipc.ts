@@ -147,3 +147,13 @@ export async function addHistoryEntry(
 ): Promise<void> {
   return invoke("add_history_entry", { url, title });
 }
+
+// ── Layout commands ────────────────────────────────────────────────
+
+export async function setSidebarOpen(open: boolean): Promise<void> {
+  return invoke("set_sidebar_open", { open });
+}
+
+export async function setSettingsOpen(open: boolean): Promise<void> {
+  return invoke("set_settings_open", { open });
+}

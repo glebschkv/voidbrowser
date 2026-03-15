@@ -89,6 +89,10 @@ pub fn create_tab_webview<R: Runtime>(
     let cookie_script = cookie_policy::generate_cookie_policy_script();
     builder = builder.initialization_script(&cookie_script);
 
+    // Inject keyboard shortcut capture script so shortcuts work when
+    // focus is in the content webview (not the toolbar).
+    builder = builder.initialization_script(KEYBOARD_SHORTCUT_SCRIPT);
+
     // For new tab pages, inject HTML via initialization_script (runs before page content loads)
     if is_new_tab {
         let new_tab_script = generate_new_tab_page_script();
@@ -564,6 +568,37 @@ fn map_resource_context(
         _ => "other",
     }
 }
+
+/// JavaScript that captures keyboard shortcuts in content webviews and
+/// forwards them to the Rust backend via Tauri IPC.
+const KEYBOARD_SHORTCUT_SCRIPT: &str = r#"
+(function() {
+    document.addEventListener('keydown', function(e) {
+        var ctrl = e.ctrlKey || e.metaKey;
+        if (!ctrl) return;
+
+        var key = null;
+        switch (e.key) {
+            case 'b': key = 'toggle_sidebar'; break;
+            case 'd': key = 'bookmark_page'; break;
+            case ',': key = 'open_settings'; break;
+            case 't': key = 'new_tab'; break;
+            case 'w': key = 'close_tab'; break;
+            case 'l': key = 'focus_address_bar'; break;
+            default: return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        try {
+            if (window.__TAURI_INTERNALS__) {
+                window.__TAURI_INTERNALS__.invoke('handle_keyboard_shortcut', { key: key });
+            }
+        } catch (_) {}
+    }, true);
+})();
+"#;
 
 /// Generate JavaScript that replaces the page with new tab content.
 /// Used as an initialization_script so it runs reliably before page content loads.

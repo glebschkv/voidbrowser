@@ -1,5 +1,5 @@
 import { Show, createSignal } from "solid-js";
-import { sidebarOpen, setSidebarOpen } from "../../stores/sidebarStore";
+import { sidebarOpen, closeSidebar } from "../../stores/sidebarStore";
 import { BookmarkPanel } from "./BookmarkPanel";
 import { HistoryPanel } from "./HistoryPanel";
 
@@ -40,7 +40,7 @@ export function Sidebar() {
           </div>
           <button
             class="w-6 h-6 flex items-center justify-center rounded hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200"
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => closeSidebar()}
             title="Close sidebar"
           >
             <svg class="w-4 h-4" viewBox="0 0 16 16" fill="none">

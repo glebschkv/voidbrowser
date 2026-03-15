@@ -1,5 +1,6 @@
 import "./styles/global.css";
 import { onMount, onCleanup } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
 import { NavigationControls } from "./components/browser/NavigationControls";
 import { AddressBar } from "./components/browser/AddressBar";
 import { TabBar } from "./components/browser/TabBar";
@@ -19,6 +20,8 @@ import { initializeSettingsStore } from "./stores/settingsStore";
 import { toggleSidebar, toggleSettings } from "./stores/sidebarStore";
 
 function App() {
+  let unlistenShortcut: (() => void) | undefined;
+
   onMount(() => {
     initializeTabStore();
     initializePrivacyStore();
@@ -26,7 +29,47 @@ function App() {
     initializeSettingsStore();
   });
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────────
+  // Listen for keyboard shortcut events forwarded from content webviews
+  onMount(async () => {
+    unlistenShortcut = await listen<string>("menu-shortcut", (event) => {
+      handleShortcutAction(event.payload);
+    });
+  });
+
+  onCleanup(() => {
+    unlistenShortcut?.();
+  });
+
+  const handleShortcutAction = (key: string) => {
+    switch (key) {
+      case "toggle_sidebar":
+        toggleSidebar();
+        break;
+      case "bookmark_page": {
+        const activeTab = getActiveTab();
+        if (activeTab && activeTab.url && !activeTab.url.startsWith("void://")) {
+          addBookmarkAction(activeTab.url, activeTab.title || activeTab.url);
+        }
+        break;
+      }
+      case "open_settings":
+        toggleSettings();
+        break;
+      case "new_tab":
+        createNewTab();
+        break;
+      case "close_tab":
+        if (tabState.activeTabId) closeTabAction(tabState.activeTabId);
+        break;
+      case "focus_address_bar": {
+        const input = document.querySelector<HTMLInputElement>("[data-address-bar]");
+        input?.focus();
+        break;
+      }
+    }
+  };
+
+  // ── Keyboard shortcuts (work when toolbar/main webview has focus) ──
   const handleKeyDown = (e: KeyboardEvent) => {
     const ctrl = e.ctrlKey || e.metaKey;
 
@@ -51,14 +94,12 @@ function App() {
       return;
     }
 
-    // Ctrl+B — toggle bookmark sidebar
     if (ctrl && e.key === "b") {
       e.preventDefault();
       toggleSidebar();
       return;
     }
 
-    // Ctrl+D — bookmark current page
     if (ctrl && e.key === "d") {
       e.preventDefault();
       const activeTab = getActiveTab();
@@ -68,7 +109,6 @@ function App() {
       return;
     }
 
-    // Ctrl+, — open settings
     if (ctrl && e.key === ",") {
       e.preventDefault();
       toggleSettings();
@@ -115,6 +155,37 @@ function App() {
       <div class="h-[46px] bg-neutral-800 border-b border-neutral-700 flex items-center px-2">
         <NavigationControls />
         <AddressBar />
+        {/* Sidebar toggle button */}
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200 ml-1"
+          onClick={() => toggleSidebar()}
+          title="Toggle sidebar (Ctrl+B)"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M2 3h12M2 8h12M2 13h8"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+        {/* Settings button */}
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200 ml-1"
+          onClick={() => toggleSettings()}
+          title="Settings (Ctrl+,)"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5" />
+            <path
+              d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
       </div>
       <Sidebar />
       <SettingsPage />
