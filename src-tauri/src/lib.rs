@@ -10,6 +10,7 @@ use tauri::Manager;
 use browser::tabs::{Tab, TabManager};
 use privacy::ad_blocker::{AdBlocker, ShieldState};
 use privacy::fingerprint::FingerprintShield;
+use privacy::https_only::HttpsOnlyState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(Arc::new(Mutex::new(TabManager::new())))
         .manage(Arc::new(Mutex::new(ShieldState::new())))
+        .manage(Arc::new(Mutex::new(HttpsOnlyState::new())))
         .invoke_handler(tauri::generate_handler![
             commands::navigate_to,
             commands::go_back,
@@ -30,6 +32,9 @@ pub fn run() {
             commands::reorder_tabs,
             commands::get_blocked_count,
             commands::toggle_shield,
+            commands::allow_http_and_navigate,
+            commands::toggle_site_shield,
+            commands::get_site_shield_status,
         ])
         .setup(|app| {
             // Initialize the ad blocker engine
@@ -69,6 +74,21 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Delete ephemeral webview data on exit for defense-in-depth.
+                // With incognito(true) enabled on all webviews, cookies and storage
+                // are already in-memory only, but we clean up any residual files.
+                if let Ok(data_dir) = app_handle.path().app_data_dir() {
+                    let webview_data = data_dir.join("EBWebView");
+                    let _ = std::fs::remove_dir_all(&webview_data);
+                    eprintln!(
+                        "Cleaned up ephemeral webview data at {}",
+                        webview_data.display()
+                    );
+                }
+            }
+        });
 }

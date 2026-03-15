@@ -68,3 +68,18 @@ export async function getBlockedCount(tabId: string): Promise<number> {
 export async function toggleShield(tabId: string): Promise<boolean> {
   return invoke("toggle_shield", { tabId });
 }
+
+export async function allowHttpAndNavigate(
+  tabId: string,
+  url: string
+): Promise<void> {
+  return invoke("allow_http_and_navigate", { tabId, url });
+}
+
+export async function toggleSiteShield(domain: string): Promise<boolean> {
+  return invoke("toggle_site_shield", { domain });
+}
+
+export async function getSiteShieldStatus(domain: string): Promise<boolean> {
+  return invoke("get_site_shield_status", { domain });
+}

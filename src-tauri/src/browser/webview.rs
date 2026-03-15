@@ -1,15 +1,18 @@
 use std::sync::{Arc, Mutex};
 
 use tauri::{
-    webview::WebviewBuilder, window::Window, Emitter, LogicalPosition, LogicalSize, Manager,
-    Runtime, Webview, WebviewUrl,
+    webview::{PageLoadEvent, WebviewBuilder},
+    window::Window,
+    Emitter, LogicalPosition, LogicalSize, Manager, Runtime, Webview, WebviewUrl,
 };
 
 use super::tabs::TabManager;
 #[cfg(target_os = "windows")]
 use crate::privacy::ad_blocker::AdBlocker;
 use crate::privacy::ad_blocker::ShieldState;
+use crate::privacy::cookie_policy;
 use crate::privacy::fingerprint::FingerprintShield;
+use crate::privacy::https_only::{self, HttpsOnlyState};
 
 /// Height of the toolbar area in logical pixels (36px tab bar + 46px toolbar).
 pub const TOOLBAR_HEIGHT: f64 = 82.0;
@@ -55,8 +58,10 @@ pub fn create_tab_webview<R: Runtime>(
     let label = tab_webview_label(tab_id);
     let tab_id_for_nav = tab_id.to_string();
     let tab_id_for_title = tab_id.to_string();
+    let tab_id_for_load = tab_id.to_string();
     let app_handle_for_nav = window.app_handle().clone();
     let app_handle_for_title = window.app_handle().clone();
+    let app_handle_for_load = window.app_handle().clone();
 
     let is_new_tab = url == "void://newtab";
 
@@ -70,11 +75,16 @@ pub fn create_tab_webview<R: Runtime>(
     };
 
     let mut builder = WebviewBuilder::new(&label, webview_url)
-        .auto_resize();
+        .auto_resize()
+        .incognito(true);
 
     // Inject fingerprint resistance script into ALL webviews (runs before any page JS)
     let fp_shield = window.app_handle().state::<FingerprintShield>();
     builder = builder.initialization_script(&fp_shield.get_injection_script());
+
+    // Inject cookie policy script to block third-party cookie access in iframes
+    let cookie_script = cookie_policy::generate_cookie_policy_script();
+    builder = builder.initialization_script(&cookie_script);
 
     // For new tab pages, inject HTML via initialization_script (runs before page content loads)
     if is_new_tab {
@@ -82,9 +92,62 @@ pub fn create_tab_webview<R: Runtime>(
         builder = builder.initialization_script(&new_tab_script);
     }
 
+    // Clone label for use in on_navigation closure to look up the webview
+    let label_for_nav = label.clone();
+
     let builder = builder
         .on_navigation(move |nav_url| {
             let url_str = nav_url.to_string();
+
+            // ── HTTPS-Only Mode ──────────────────────────────────────
+            // Block HTTP navigations and redirect to HTTPS, unless the
+            // user has explicitly allowed HTTP for this domain or the
+            // shield is disabled for the site.
+            if url_str.starts_with("http://") {
+                let domain = https_only::extract_domain(&url_str)
+                    .unwrap_or_default();
+
+                let https_state =
+                    app_handle_for_nav.state::<Arc<Mutex<HttpsOnlyState>>>();
+                let shield_state =
+                    app_handle_for_nav.state::<Arc<Mutex<ShieldState>>>();
+
+                // Check if HTTP is allowed for this domain
+                let http_allowed = match https_state.lock() {
+                    Ok(s) => s.is_http_allowed(&domain),
+                    Err(e) => e.into_inner().is_http_allowed(&domain),
+                };
+
+                // Check if shield is disabled for this site
+                let site_disabled = match shield_state.lock() {
+                    Ok(s) => s.is_site_disabled(&domain),
+                    Err(e) => e.into_inner().is_site_disabled(&domain),
+                };
+
+                if !http_allowed && !site_disabled {
+                    // Block HTTP navigation — navigate to about:blank and
+                    // set a pending warning so on_page_load injects the
+                    // warning page after about:blank finishes loading.
+                    if let Ok(mut hs) = https_state.lock() {
+                        hs.set_pending_warning(&tab_id_for_nav, &url_str);
+                        hs.record_upgrade(&tab_id_for_nav);
+                    }
+
+                    // Navigate to about:blank; the warning will be injected
+                    // in the on_page_load handler once it finishes loading.
+                    if let Some(wv) =
+                        app_handle_for_nav.get_webview(&label_for_nav)
+                    {
+                        let blank_url: url::Url =
+                            "about:blank".parse().expect("valid URL");
+                        let _ = wv.navigate(blank_url);
+                    }
+
+                    return false;
+                }
+            }
+
+            // ── Normal navigation handling ────────────────────────────
             let favicon = derive_favicon_url(&url_str);
 
             // Update TabManager state
@@ -145,6 +208,26 @@ pub fn create_tab_webview<R: Runtime>(
             if let Some(info) = tab_info {
                 let _ = app_handle_for_title.emit("tab-updated", &info);
             }
+        })
+        .on_page_load(move |webview, payload| {
+            // Inject HTTPS warning page after about:blank finishes loading
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                let https_state =
+                    app_handle_for_load.state::<Arc<Mutex<HttpsOnlyState>>>();
+                let pending_url = match https_state.lock() {
+                    Ok(mut s) => s.take_pending_warning(&tab_id_for_load),
+                    Err(e) => e.into_inner().take_pending_warning(&tab_id_for_load),
+                };
+
+                if let Some(original_http_url) = pending_url {
+                    let warning_script =
+                        https_only::generate_https_warning_page(
+                            &original_http_url,
+                            &tab_id_for_load,
+                        );
+                    let _ = webview.eval(&warning_script);
+                }
+            }
         });
 
     let webview = window
@@ -190,6 +273,7 @@ unsafe fn pwstr_to_string_safe(pwstr: windows::core::PWSTR) -> String {
 ///
 /// This hooks into every HTTP/HTTPS request the webview makes and checks it
 /// against the adblock engine. Blocked requests receive an empty 204 response.
+/// Third-party requests also have their Cookie headers stripped.
 ///
 /// The entire callback body is wrapped in `catch_unwind` so that a panic in any
 /// step lets the request through instead of crashing the webview process.
@@ -322,18 +406,35 @@ fn setup_request_interception<R: Runtime>(
                             };
 
                             // Check the shield state — recover from poisoned mutex
+                            // Check both per-tab and per-site disabled state
+                            let domain = crate::privacy::https_only::extract_domain(&url_str)
+                                .unwrap_or_default();
                             let is_disabled = match shield.lock() {
-                                Ok(s) => s.is_disabled(&tab_id),
+                                Ok(s) => {
+                                    s.is_disabled(&tab_id)
+                                        || s.is_site_disabled(&domain)
+                                }
                                 Err(e) => {
                                     eprintln!(
                                         "[AdBlock] Shield lock poisoned, recovering: {e}"
                                     );
-                                    e.into_inner().is_disabled(&tab_id)
+                                    let s = e.into_inner();
+                                    s.is_disabled(&tab_id)
+                                        || s.is_site_disabled(&domain)
                                 }
                             };
 
                             if is_disabled {
                                 return;
+                            }
+
+                            // Strip Cookie header from third-party requests
+                            if !source_url.is_empty()
+                                && cookie_policy::is_third_party(&url_str, &source_url)
+                            {
+                                if let Ok(headers) = request.Headers() {
+                                    let _ = headers.RemoveHeader(&HSTRING::from("Cookie"));
+                                }
                             }
 
                             // Check the adblock engine — recover from poisoned mutex

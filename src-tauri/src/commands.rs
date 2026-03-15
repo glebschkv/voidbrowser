@@ -6,6 +6,7 @@ use crate::browser::navigation;
 use crate::browser::tabs::{Tab, TabInfo, TabManager};
 use crate::browser::webview;
 use crate::privacy::ad_blocker::ShieldState;
+use crate::privacy::https_only::{self, HttpsOnlyState};
 
 /// Helper: get the webview label for a tab id.
 fn webview_label(tab_id: &str) -> String {
@@ -289,5 +290,63 @@ pub async fn toggle_shield<R: Runtime>(
     let mut state = shield.lock().map_err(|e| e.to_string())?;
     let enabled = state.toggle(&tab_id);
     Ok(enabled)
+}
+
+// ── Phase 5: HTTPS-Only + Per-site shield commands ──────────────────
+
+#[tauri::command]
+pub async fn allow_http_and_navigate<R: Runtime>(
+    app: AppHandle<R>,
+    tab_id: String,
+    url: String,
+) -> Result<(), String> {
+    let domain = https_only::extract_domain(&url)
+        .ok_or_else(|| format!("Cannot extract domain from URL: {url}"))?;
+
+    // Add domain to the allowed-HTTP set
+    let https_state = app.state::<Arc<Mutex<HttpsOnlyState>>>();
+    if let Ok(mut state) = https_state.lock() {
+        state.allow_http(&domain);
+    }
+
+    // Navigate the tab's webview to the HTTP URL
+    let parsed: url::Url = url.parse().map_err(|e: url::ParseError| e.to_string())?;
+    let label = webview_label(&tab_id);
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| format!("Webview not found for tab: {tab_id}"))?;
+    webview.navigate(parsed).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn toggle_site_shield<R: Runtime>(
+    app: AppHandle<R>,
+    domain: String,
+) -> Result<bool, String> {
+    let shield = app.state::<Arc<Mutex<ShieldState>>>();
+    let mut state = shield.lock().map_err(|e| e.to_string())?;
+    let enabled = state.toggle_site(&domain);
+
+    let _ = app.emit(
+        "site-shield-toggled",
+        serde_json::json!({
+            "domain": domain,
+            "enabled": enabled
+        }),
+    );
+
+    Ok(enabled)
+}
+
+#[tauri::command]
+pub async fn get_site_shield_status<R: Runtime>(
+    app: AppHandle<R>,
+    domain: String,
+) -> Result<bool, String> {
+    let shield = app.state::<Arc<Mutex<ShieldState>>>();
+    let state = shield.lock().map_err(|e| e.to_string())?;
+    Ok(!state.is_site_disabled(&domain))
 }
 
