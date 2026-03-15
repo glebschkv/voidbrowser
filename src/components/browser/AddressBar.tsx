@@ -2,6 +2,7 @@ import { createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { navigateTo, getCurrentUrl } from "../../lib/ipc";
 import { tabState } from "../../stores/tabStore";
+import { ShieldIcon } from "../privacy/ShieldIcon";
 
 export function AddressBar() {
   const [url, setUrl] = createSignal("");
@@ -113,6 +114,7 @@ export function AddressBar() {
         onKeyDown={handleKeyDown}
         spellcheck={false}
       />
+      <ShieldIcon />
     </div>
   );
 }

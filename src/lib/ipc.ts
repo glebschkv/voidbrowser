@@ -58,3 +58,13 @@ export async function reloadPage(): Promise<void> {
 export async function getCurrentUrl(): Promise<string> {
   return invoke("get_current_url");
 }
+
+// ── Privacy commands ────────────────────────────────────────────────
+
+export async function getBlockedCount(tabId: string): Promise<number> {
+  return invoke("get_blocked_count", { tabId });
+}
+
+export async function toggleShield(tabId: string): Promise<boolean> {
+  return invoke("toggle_shield", { tabId });
+}

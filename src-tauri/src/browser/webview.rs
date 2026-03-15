@@ -6,6 +6,9 @@ use tauri::{
 };
 
 use super::tabs::TabManager;
+#[cfg(target_os = "windows")]
+use crate::privacy::ad_blocker::AdBlocker;
+use crate::privacy::ad_blocker::ShieldState;
 
 /// Height of the toolbar area in logical pixels (36px tab bar + 46px toolbar).
 pub const TOOLBAR_HEIGHT: f64 = 82.0;
@@ -58,6 +61,19 @@ pub fn create_tab_webview<R: Runtime>(
                 }
             }
 
+            // Reset blocked count on navigation to a new page
+            let shield_state = app_handle_for_nav.state::<Arc<Mutex<ShieldState>>>();
+            if let Ok(mut shield) = shield_state.lock() {
+                shield.reset(&tab_id_for_nav);
+            }
+            let _ = app_handle_for_nav.emit(
+                "blocked-count-updated",
+                serde_json::json!({
+                    "tabId": tab_id_for_nav,
+                    "count": 0
+                }),
+            );
+
             let _ = app_handle_for_nav.emit(
                 "tab-url-changed",
                 serde_json::json!({
@@ -105,7 +121,223 @@ pub fn create_tab_webview<R: Runtime>(
         let _ = webview.eval(&new_tab_html);
     }
 
+    // Set up native WebView2 request interception for ad blocking (Windows only)
+    #[cfg(target_os = "windows")]
+    {
+        let tab_id_owned = tab_id.to_string();
+        let app_handle = window.app_handle().clone();
+        if let Err(e) = setup_request_interception(&webview, tab_id_owned, app_handle) {
+            eprintln!("Failed to set up request interception: {e}");
+        }
+    }
+
     Ok(webview)
+}
+
+/// Set up WebView2 native request interception via the COM API.
+///
+/// This hooks into every HTTP/HTTPS request the webview makes and checks it
+/// against the adblock engine. Blocked requests receive an empty 204 response.
+#[cfg(target_os = "windows")]
+fn setup_request_interception<R: Runtime>(
+    webview: &Webview<R>,
+    tab_id: String,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2, ICoreWebView2Environment, ICoreWebView2WebResourceRequestedEventArgs,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST,
+    };
+    use webview2_com::WebResourceRequestedEventHandler;
+    use windows::core::HSTRING;
+    use windows::Win32::System::WinRT::EventRegistrationToken;
+
+    webview
+        .with_webview(move |wv| {
+            // SAFETY: We access the WebView2 COM interface through the controller
+            // provided by wry. The controller lifetime is tied to the webview.
+            let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+                let core: ICoreWebView2 = wv
+                    .controller()
+                    .CoreWebView2()
+                    .map_err(|e| format!("Failed to get CoreWebView2: {e}"))?;
+
+                // Get the environment for creating responses
+                let mut env_ptr: Option<ICoreWebView2Environment> = None;
+                core.Environment(&mut env_ptr)
+                    .map_err(|e| format!("Failed to get environment: {e}"))?;
+                let env = env_ptr
+                    .ok_or_else(|| "WebView2 environment is null".to_string())?;
+
+                // Register filter to intercept all HTTP/HTTPS requests
+                core.AddWebResourceRequestedFilter(
+                    &HSTRING::from("*"),
+                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                )
+                .map_err(|e| format!("Failed to add resource filter: {e}"))?;
+
+                let blocker = app_handle.state::<Arc<Mutex<AdBlocker>>>();
+                let shield = app_handle.state::<Arc<Mutex<ShieldState>>>();
+                let blocker = Arc::clone(&*blocker);
+                let shield = Arc::clone(&*shield);
+                let app_for_emit = app_handle.clone();
+
+                let handler = WebResourceRequestedEventHandler::create(Box::new(
+                    move |sender: Option<ICoreWebView2>,
+                          args: Option<
+                        ICoreWebView2WebResourceRequestedEventArgs,
+                    >| {
+                        let result = catch_unwind(AssertUnwindSafe(|| {
+                            let args = match args {
+                                Some(a) => a,
+                                None => return Ok(()),
+                            };
+
+                            // Get the request URL
+                            let request = unsafe { args.Request() }
+                                .map_err(|e| format!("Failed to get request: {e}"))?;
+                            let uri = unsafe { request.Uri() }
+                                .map_err(|e| format!("Failed to get URI: {e}"))?;
+                            let url_str = uri.to_string();
+
+                            // Skip non-HTTP requests and data URIs
+                            if !url_str.starts_with("http://")
+                                && !url_str.starts_with("https://")
+                            {
+                                return Ok(());
+                            }
+
+                            // Get the page URL from the sender webview as source_url
+                            let source_url = if let Some(ref sender) = sender {
+                                unsafe { sender.Source() }
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_default()
+                            } else {
+                                String::new()
+                            };
+
+                            // Map WebView2 resource context to adblock resource type string
+                            let resource_context = unsafe { args.ResourceContext() }
+                                .map_err(|e| format!("Failed to get context: {e}"))?;
+                            let resource_type = map_resource_context(resource_context);
+
+                            // Check the shield state and adblock engine
+                            let should_block = {
+                                let is_disabled = shield
+                                    .lock()
+                                    .map(|s| s.is_disabled(&tab_id))
+                                    .unwrap_or(false);
+
+                                if is_disabled {
+                                    false
+                                } else {
+                                    blocker
+                                        .lock()
+                                        .map(|b| {
+                                            b.should_block(
+                                                &url_str,
+                                                &source_url,
+                                                resource_type,
+                                            )
+                                        })
+                                        .unwrap_or(false)
+                                }
+                            };
+
+                            if should_block {
+                                // Create an empty 204 No Content response to block the request
+                                let response = unsafe {
+                                    env.CreateWebResourceResponse(
+                                        None, // no content stream
+                                        204,
+                                        &HSTRING::from("No Content"),
+                                        &HSTRING::from(""),
+                                    )
+                                }
+                                .map_err(|e| {
+                                    format!("Failed to create blocked response: {e}")
+                                })?;
+
+                                unsafe { args.SetResponse(&response) }
+                                    .map_err(|e| {
+                                        format!("Failed to set response: {e}")
+                                    })?;
+
+                                // Increment blocked count and emit event to frontend
+                                if let Ok(mut s) = shield.lock() {
+                                    let count = s.increment(&tab_id);
+                                    let _ = app_for_emit.emit(
+                                        "blocked-count-updated",
+                                        serde_json::json!({
+                                            "tabId": tab_id,
+                                            "count": count
+                                        }),
+                                    );
+                                }
+                            }
+
+                            Ok(())
+                        }));
+
+                        match result {
+                            Ok(inner) => inner.map_err(|e| {
+                                eprintln!("Ad blocker error: {e}");
+                                windows::core::Error::empty()
+                            }),
+                            Err(_) => {
+                                eprintln!("Ad blocker handler panicked");
+                                Ok(())
+                            }
+                        }
+                    },
+                ));
+
+                let mut token = EventRegistrationToken::default();
+                core.add_WebResourceRequested(&handler, &mut token)
+                    .map_err(|e| format!("Failed to register handler: {e}"))?;
+
+                Ok::<(), String>(())
+            }));
+
+            match result {
+                Ok(inner) => {
+                    if let Err(e) = inner {
+                        eprintln!("Request interception setup error: {e}");
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Request interception setup panicked");
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Map a WebView2 resource context enum to an adblock-compatible resource type string.
+#[cfg(target_os = "windows")]
+fn map_resource_context(
+    ctx: webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_CONTEXT,
+) -> &'static str {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+
+    match ctx {
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => "document",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET => "stylesheet",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE => "image",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA => "media",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT => "font",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT => "script",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST => "xmlhttprequest",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH => "xmlhttprequest",
+        _ => "other",
+    }
 }
 
 /// Generate JavaScript that replaces the page with our new tab content.
