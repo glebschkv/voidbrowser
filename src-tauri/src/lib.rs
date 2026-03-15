@@ -57,6 +57,17 @@ pub fn run() {
             commands::set_sidebar_open,
             commands::set_settings_open,
             commands::handle_keyboard_shortcut,
+            // Privacy stats
+            commands::get_privacy_stats,
+            // Find-in-page
+            commands::find_in_page,
+            commands::find_next,
+            commands::find_previous,
+            commands::stop_find_in_page,
+            // Zoom
+            commands::zoom_in,
+            commands::zoom_out,
+            commands::zoom_reset,
         ])
         .setup(|app| {
             // Initialize the ad blocker engine

@@ -1,9 +1,10 @@
 import "./styles/global.css";
-import { onMount, onCleanup } from "solid-js";
+import { onMount, onCleanup, createSignal } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { NavigationControls } from "./components/browser/NavigationControls";
 import { AddressBar } from "./components/browser/AddressBar";
 import { TabBar } from "./components/browser/TabBar";
+import { FindBar } from "./components/browser/FindBar";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { SettingsPage } from "./components/settings/SettingsPage";
 import {
@@ -18,8 +19,10 @@ import { initializePrivacyStore } from "./stores/privacyStore";
 import { initializeBookmarkStore, addBookmarkAction } from "./stores/bookmarkStore";
 import { initializeSettingsStore } from "./stores/settingsStore";
 import { toggleSidebar, toggleSettings } from "./stores/sidebarStore";
+import { zoomIn, zoomOut, zoomReset } from "./lib/ipc";
 
 function App() {
+  const [findBarVisible, setFindBarVisible] = createSignal(false);
   let unlistenShortcut: (() => void) | undefined;
 
   onMount(() => {
@@ -66,6 +69,18 @@ function App() {
         input?.focus();
         break;
       }
+      case "find_in_page":
+        setFindBarVisible(true);
+        break;
+      case "zoom_in":
+        zoomIn().catch(console.error);
+        break;
+      case "zoom_out":
+        zoomOut().catch(console.error);
+        break;
+      case "zoom_reset":
+        zoomReset().catch(console.error);
+        break;
     }
   };
 
@@ -112,6 +127,30 @@ function App() {
     if (ctrl && e.key === ",") {
       e.preventDefault();
       toggleSettings();
+      return;
+    }
+
+    if (ctrl && e.key === "f") {
+      e.preventDefault();
+      setFindBarVisible(true);
+      return;
+    }
+
+    if (ctrl && (e.key === "=" || e.key === "+")) {
+      e.preventDefault();
+      zoomIn().catch(console.error);
+      return;
+    }
+
+    if (ctrl && e.key === "-") {
+      e.preventDefault();
+      zoomOut().catch(console.error);
+      return;
+    }
+
+    if (ctrl && e.key === "0") {
+      e.preventDefault();
+      zoomReset().catch(console.error);
       return;
     }
 
@@ -187,6 +226,7 @@ function App() {
           </svg>
         </button>
       </div>
+      <FindBar visible={findBarVisible()} onClose={() => setFindBarVisible(false)} />
       <Sidebar />
       <SettingsPage />
     </div>

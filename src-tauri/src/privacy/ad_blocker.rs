@@ -63,6 +63,10 @@ pub struct ShieldState {
     blocked_counts: HashMap<String, u64>,
     disabled_tabs: HashSet<String>,
     disabled_sites: HashSet<String>,
+    /// Total blocked requests across all tabs this session.
+    total_session_blocked: u64,
+    /// Blocked request counts per domain for the privacy dashboard.
+    blocked_domains: HashMap<String, u64>,
 }
 
 #[allow(dead_code)]
@@ -72,14 +76,44 @@ impl ShieldState {
             blocked_counts: HashMap::new(),
             disabled_tabs: HashSet::new(),
             disabled_sites: HashSet::new(),
+            total_session_blocked: 0,
+            blocked_domains: HashMap::new(),
         }
     }
 
     /// Increment the blocked count for a tab, returning the new count.
-    pub fn increment(&mut self, tab_id: &str) -> u64 {
+    /// Also tracks session-wide totals and per-domain counts.
+    pub fn increment(&mut self, tab_id: &str, blocked_url: &str) -> u64 {
         let count = self.blocked_counts.entry(tab_id.to_string()).or_insert(0);
         *count += 1;
+        self.total_session_blocked += 1;
+
+        // Extract domain from blocked URL for stats
+        if let Ok(parsed) = blocked_url.parse::<url::Url>() {
+            if let Some(host) = parsed.host_str() {
+                let domain_count = self.blocked_domains.entry(host.to_string()).or_insert(0);
+                *domain_count += 1;
+            }
+        }
+
         *count
+    }
+
+    /// Get total blocked requests across all tabs this session.
+    pub fn get_total_blocked(&self) -> u64 {
+        self.total_session_blocked
+    }
+
+    /// Get top N blocked domains sorted by count descending.
+    pub fn get_top_blocked_domains(&self, n: usize) -> Vec<(String, u64)> {
+        let mut domains: Vec<(String, u64)> = self
+            .blocked_domains
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        domains.sort_by(|a, b| b.1.cmp(&a.1));
+        domains.truncate(n);
+        domains
     }
 
     /// Get the current blocked count for a tab.
@@ -139,9 +173,13 @@ mod tests {
     fn test_shield_state_increment() {
         let mut state = ShieldState::new();
         assert_eq!(state.get_count("tab1"), 0);
-        assert_eq!(state.increment("tab1"), 1);
-        assert_eq!(state.increment("tab1"), 2);
+        assert_eq!(state.increment("tab1", "https://ads.example.com/tracker.js"), 1);
+        assert_eq!(state.increment("tab1", "https://ads.example.com/other.js"), 2);
         assert_eq!(state.get_count("tab1"), 2);
+        assert_eq!(state.get_total_blocked(), 2);
+        let top = state.get_top_blocked_domains(10);
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0], ("ads.example.com".to_string(), 2));
     }
 
     #[test]
@@ -159,7 +197,7 @@ mod tests {
     #[test]
     fn test_shield_state_remove_tab() {
         let mut state = ShieldState::new();
-        state.increment("tab1");
+        state.increment("tab1", "https://example.com/ad.js");
         state.toggle("tab1");
         state.remove_tab("tab1");
         assert_eq!(state.get_count("tab1"), 0);

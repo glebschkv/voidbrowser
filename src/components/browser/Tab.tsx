@@ -6,6 +6,7 @@ interface TabProps {
   title: string;
   url: string;
   isActive: boolean;
+  isLoading: boolean;
   faviconUrl: string | null;
   onClose: (id: string) => void;
   onSelect: (id: string) => void;
@@ -75,31 +76,45 @@ export function Tab(props: TabProps) {
           <div class="absolute bottom-0 left-0 right-0 h-[2px] bg-accent" />
         </Show>
 
-        {/* Favicon */}
+        {/* Favicon / Loading spinner */}
         <Show
-          when={props.faviconUrl && !faviconError()}
+          when={!props.isLoading}
           fallback={
             <svg
-              class="w-3.5 h-3.5 flex-shrink-0 text-neutral-500"
+              class="w-3.5 h-3.5 flex-shrink-0 text-accent animate-spin"
               viewBox="0 0 16 16"
               fill="none"
             >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                stroke="currentColor"
-                stroke-width="1.5"
-              />
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
+              <path d="M14 8A6 6 0 0 0 8 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
           }
         >
-          <img
-            src={props.faviconUrl!}
-            class="w-3.5 h-3.5 flex-shrink-0"
-            alt=""
-            onError={() => setFaviconError(true)}
-          />
+          <Show
+            when={props.faviconUrl && !faviconError()}
+            fallback={
+              <svg
+                class="w-3.5 h-3.5 flex-shrink-0 text-neutral-500"
+                viewBox="0 0 16 16"
+                fill="none"
+              >
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="6"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
+              </svg>
+            }
+          >
+            <img
+              src={props.faviconUrl!}
+              class="w-3.5 h-3.5 flex-shrink-0"
+              alt=""
+              onError={() => setFaviconError(true)}
+            />
+          </Show>
         </Show>
 
         {/* Title */}

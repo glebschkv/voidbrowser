@@ -66,9 +66,12 @@ pub fn create_tab_webview<R: Runtime>(
     let app_handle_for_history_nav = window.app_handle().clone();
     let app_handle_for_history_title = window.app_handle().clone();
 
+    let is_void_page = url.starts_with("void://");
     let is_new_tab = url == "void://newtab";
+    let is_privacy = url == "void://privacy";
+    let is_about = url == "void://about";
 
-    let webview_url = if is_new_tab {
+    let webview_url = if is_void_page {
         WebviewUrl::External("about:blank".parse().expect("about:blank is a valid URL"))
     } else {
         WebviewUrl::External(
@@ -93,10 +96,16 @@ pub fn create_tab_webview<R: Runtime>(
     // focus is in the content webview (not the toolbar).
     builder = builder.initialization_script(KEYBOARD_SHORTCUT_SCRIPT);
 
-    // For new tab pages, inject HTML via initialization_script (runs before page content loads)
+    // For void:// pages, inject HTML via initialization_script
     if is_new_tab {
         let new_tab_script = generate_new_tab_page_script();
         builder = builder.initialization_script(&new_tab_script);
+    } else if is_privacy {
+        let privacy_script = generate_privacy_dashboard_script();
+        builder = builder.initialization_script(&privacy_script);
+    } else if is_about {
+        let about_script = generate_about_page_script();
+        builder = builder.initialization_script(&about_script);
     }
 
     // Clone label for use in on_navigation closure to look up the webview
@@ -213,19 +222,32 @@ pub fn create_tab_webview<R: Runtime>(
         .on_document_title_changed(move |_webview, title| {
             // Update TabManager state
             let tab_mgr = app_handle_for_title.state::<Arc<Mutex<TabManager>>>();
-            let (tab_info, tab_url) = if let Ok(mut mgr) = tab_mgr.lock() {
+            let (tab_info, tab_url, is_active) = if let Ok(mut mgr) = tab_mgr.lock() {
+                let active = mgr.active_tab_id.as_deref() == Some(&tab_id_for_title);
                 if let Some(tab) = mgr.get_tab_mut(&tab_id_for_title) {
                     tab.title = title.clone();
-                    (Some(tab.to_info()), Some(tab.url.clone()))
+                    (Some(tab.to_info()), Some(tab.url.clone()), active)
                 } else {
-                    (None, None)
+                    (None, None, false)
                 }
             } else {
-                (None, None)
+                (None, None, false)
             };
 
             if let Some(info) = tab_info {
                 let _ = app_handle_for_title.emit("tab-updated", &info);
+            }
+
+            // Update window title if this is the active tab
+            if is_active {
+                if let Some(window) = app_handle_for_title.get_window("main") {
+                    let window_title = if title.is_empty() {
+                        "VoidBrowser".to_string()
+                    } else {
+                        format!("{title} \u{2014} VoidBrowser")
+                    };
+                    let _ = window.set_title(&window_title);
+                }
             }
 
             // Update session history entry title
@@ -243,6 +265,18 @@ pub fn create_tab_webview<R: Runtime>(
             }
         })
         .on_page_load(move |webview, payload| {
+            let is_loading = matches!(payload.event(), PageLoadEvent::Started);
+
+            // Update loading state in TabManager and emit tab-updated event
+            let tab_mgr = app_handle_for_load.state::<Arc<Mutex<TabManager>>>();
+            if let Ok(mut mgr) = tab_mgr.lock() {
+                if let Some(tab) = mgr.get_tab_mut(&tab_id_for_load) {
+                    tab.is_loading = is_loading;
+                    let info = tab.to_info();
+                    let _ = app_handle_for_load.emit("tab-updated", &info);
+                }
+            }
+
             // Inject HTTPS warning page after about:blank finishes loading
             if matches!(payload.event(), PageLoadEvent::Finished) {
                 let https_state =
@@ -513,8 +547,8 @@ fn setup_request_interception<R: Runtime>(
 
                             // Increment blocked count and emit event to frontend
                             let count = match shield.lock() {
-                                Ok(mut s) => s.increment(&tab_id),
-                                Err(e) => e.into_inner().increment(&tab_id),
+                                Ok(mut s) => s.increment(&tab_id, &url_str),
+                                Err(e) => e.into_inner().increment(&tab_id, &url_str),
                             };
                             let _ = app_for_emit.emit(
                                 "blocked-count-updated",
@@ -585,6 +619,10 @@ const KEYBOARD_SHORTCUT_SCRIPT: &str = r#"
             case 't': key = 'new_tab'; break;
             case 'w': key = 'close_tab'; break;
             case 'l': key = 'focus_address_bar'; break;
+            case 'f': key = 'find_in_page'; break;
+            case '=': case '+': key = 'zoom_in'; break;
+            case '-': key = 'zoom_out'; break;
+            case '0': key = 'zoom_reset'; break;
             default: return;
         }
 
@@ -607,8 +645,7 @@ fn generate_new_tab_page_script() -> String {
     document.addEventListener('DOMContentLoaded', function() {
         if (window.location.href !== 'about:blank') return;
         document.open();
-        document.write('\
-<!DOCTYPE html>\
+        document.write('<!DOCTYPE html>\
 <html>\
 <head>\
     <meta charset="utf-8">\
@@ -623,8 +660,9 @@ fn generate_new_tab_page_script() -> String {
             flex-direction: column;\
             align-items: center;\
             justify-content: center;\
-            height: 100vh;\
+            min-height: 100vh;\
             user-select: none;\
+            padding: 2rem;\
         }\
         h1 {\
             font-size: 2.5rem;\
@@ -633,9 +671,7 @@ fn generate_new_tab_page_script() -> String {
             color: #e5e5e5;\
             letter-spacing: 0.05em;\
         }\
-        h1 span {\
-            color: #6366f1;\
-        }\
+        h1 span { color: #6366f1; }\
         .search-container {\
             width: 100%;\
             max-width: 580px;\
@@ -652,13 +688,53 @@ fn generate_new_tab_page_script() -> String {
             outline: none;\
             transition: border-color 0.2s;\
         }\
-        input:focus {\
-            border-color: #6366f1;\
+        input:focus { border-color: #6366f1; }\
+        input::placeholder { color: #737373; }\
+        .bookmarks-grid {\
+            display: grid;\
+            grid-template-columns: repeat(4, 1fr);\
+            gap: 12px;\
+            max-width: 580px;\
+            width: 100%;\
+            margin-top: 2rem;\
         }\
-        input::placeholder {\
-            color: #737373;\
+        .bookmark-tile {\
+            display: flex;\
+            flex-direction: column;\
+            align-items: center;\
+            gap: 8px;\
+            padding: 16px 8px;\
+            background: #262626;\
+            border-radius: 8px;\
+            cursor: pointer;\
+            transition: background 0.2s;\
+            text-decoration: none;\
+            color: #d4d4d4;\
+            min-height: 80px;\
         }\
-        .tagline {\
+        .bookmark-tile:hover { background: #404040; }\
+        .bookmark-favicon {\
+            width: 24px;\
+            height: 24px;\
+            border-radius: 4px;\
+            background: #404040;\
+            display: flex;\
+            align-items: center;\
+            justify-content: center;\
+            font-size: 14px;\
+            color: #a3a3a3;\
+            overflow: hidden;\
+        }\
+        .bookmark-favicon img { width: 100%; height: 100%; object-fit: cover; }\
+        .bookmark-title {\
+            font-size: 0.75rem;\
+            text-align: center;\
+            overflow: hidden;\
+            text-overflow: ellipsis;\
+            white-space: nowrap;\
+            max-width: 100%;\
+        }\
+        .stats-footer {\
             margin-top: 3rem;\
             color: #525252;\
             font-size: 0.85rem;\
@@ -668,14 +744,10 @@ fn generate_new_tab_page_script() -> String {
 <body>\
     <h1>Void<span>Browser</span></h1>\
     <div class="search-container">\
-        <input\
-            type="text"\
-            placeholder="Search the web or enter a URL"\
-            autofocus\
-            id="searchInput"\
-        />\
+        <input type="text" placeholder="Search the web or enter a URL" autofocus id="searchInput" />\
     </div>\
-    <p class="tagline">Your browser. Your data. Nobody else\'s.</p>\
+    <div id="bookmarksGrid" class="bookmarks-grid"></div>\
+    <p id="statsFooter" class="stats-footer">Your browser. Your data. Nobody\\x27s else\\x27s.</p>\
     <script>\
         document.getElementById("searchInput").addEventListener("keydown", function(e) {\
             if (e.key === "Enter" && this.value.trim()) {\
@@ -691,7 +763,308 @@ fn generate_new_tab_page_script() -> String {
                 }\
             }\
         });\
+        /* Load bookmarks */\
+        (function() {\
+            if (!window.__TAURI_INTERNALS__) return;\
+            try {\
+                window.__TAURI_INTERNALS__.invoke("get_bookmarks", { folder: null }).then(function(bookmarks) {\
+                    var grid = document.getElementById("bookmarksGrid");\
+                    if (!grid || !bookmarks || bookmarks.length === 0) return;\
+                    var top8 = bookmarks.slice(0, 8);\
+                    top8.forEach(function(bm) {\
+                        var a = document.createElement("a");\
+                        a.className = "bookmark-tile";\
+                        a.href = bm.url;\
+                        var fav = document.createElement("div");\
+                        fav.className = "bookmark-favicon";\
+                        try {\
+                            var u = new URL(bm.url);\
+                            var img = document.createElement("img");\
+                            img.src = u.origin + "/favicon.ico";\
+                            img.onerror = function() { this.parentNode.textContent = bm.title.charAt(0).toUpperCase(); };\
+                            fav.appendChild(img);\
+                        } catch(e) { fav.textContent = bm.title.charAt(0).toUpperCase(); }\
+                        var title = document.createElement("span");\
+                        title.className = "bookmark-title";\
+                        title.textContent = bm.title;\
+                        a.appendChild(fav);\
+                        a.appendChild(title);\
+                        grid.appendChild(a);\
+                    });\
+                }).catch(function() {});\
+                window.__TAURI_INTERNALS__.invoke("get_privacy_stats").then(function(stats) {\
+                    var footer = document.getElementById("statsFooter");\
+                    if (!footer || !stats) return;\
+                    if (stats.totalBlocked > 0) {\
+                        footer.textContent = stats.totalBlocked + " trackers blocked this session";\
+                    }\
+                }).catch(function() {});\
+            } catch(e) {}\
+        })();\
     </script>\
+</body>\
+</html>');
+        document.close();
+    });
+    "#.to_string()
+}
+
+/// Generate JavaScript that replaces the page with the privacy dashboard.
+fn generate_privacy_dashboard_script() -> String {
+    r#"
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.location.href !== 'about:blank') return;
+        document.open();
+        document.write('<!DOCTYPE html>\
+<html>\
+<head>\
+    <meta charset="utf-8">\
+    <title>Privacy Dashboard — VoidBrowser</title>\
+    <style>\
+        * { margin: 0; padding: 0; box-sizing: border-box; }\
+        body {\
+            background: #171717;\
+            color: #f5f5f5;\
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\
+            padding: 3rem 2rem;\
+            user-select: none;\
+        }\
+        .header {\
+            text-align: center;\
+            margin-bottom: 3rem;\
+        }\
+        h1 {\
+            font-size: 1.75rem;\
+            font-weight: 300;\
+            color: #e5e5e5;\
+            letter-spacing: 0.05em;\
+        }\
+        h1 span { color: #6366f1; }\
+        .subtitle {\
+            color: #737373;\
+            font-size: 0.9rem;\
+            margin-top: 0.5rem;\
+        }\
+        .stats-grid {\
+            display: grid;\
+            grid-template-columns: repeat(3, 1fr);\
+            gap: 1.5rem;\
+            max-width: 700px;\
+            margin: 0 auto 3rem;\
+        }\
+        .stat-card {\
+            background: #262626;\
+            border-radius: 12px;\
+            padding: 2rem 1.5rem;\
+            text-align: center;\
+        }\
+        .stat-number {\
+            font-size: 3rem;\
+            font-weight: 700;\
+            color: #6366f1;\
+            line-height: 1;\
+            margin-bottom: 0.5rem;\
+        }\
+        .stat-label {\
+            color: #a3a3a3;\
+            font-size: 0.85rem;\
+            text-transform: uppercase;\
+            letter-spacing: 0.05em;\
+        }\
+        .domains-section {\
+            max-width: 700px;\
+            margin: 0 auto;\
+        }\
+        .domains-section h2 {\
+            font-size: 1.1rem;\
+            font-weight: 500;\
+            color: #d4d4d4;\
+            margin-bottom: 1rem;\
+        }\
+        .domain-row {\
+            display: flex;\
+            justify-content: space-between;\
+            align-items: center;\
+            padding: 0.75rem 1rem;\
+            background: #262626;\
+            border-radius: 6px;\
+            margin-bottom: 4px;\
+        }\
+        .domain-name {\
+            font-family: monospace;\
+            font-size: 0.85rem;\
+            color: #d4d4d4;\
+        }\
+        .domain-count {\
+            font-size: 0.85rem;\
+            color: #6366f1;\
+            font-weight: 600;\
+        }\
+        .empty-state {\
+            text-align: center;\
+            color: #525252;\
+            font-size: 0.9rem;\
+            padding: 2rem;\
+        }\
+    </style>\
+</head>\
+<body>\
+    <div class="header">\
+        <h1>Privacy <span>Dashboard</span></h1>\
+        <p class="subtitle">Session stats — resets when you close the browser</p>\
+    </div>\
+    <div class="stats-grid">\
+        <div class="stat-card">\
+            <div class="stat-number" id="blocked">0</div>\
+            <div class="stat-label">Trackers Blocked</div>\
+        </div>\
+        <div class="stat-card">\
+            <div class="stat-number" id="ads">0</div>\
+            <div class="stat-label">Ads Blocked</div>\
+        </div>\
+        <div class="stat-card">\
+            <div class="stat-number" id="upgrades">0</div>\
+            <div class="stat-label">HTTPS Upgrades</div>\
+        </div>\
+    </div>\
+    <div class="domains-section">\
+        <h2>Top Blocked Domains</h2>\
+        <div id="domainList"><p class="empty-state">No blocked domains yet</p></div>\
+    </div>\
+    <script>\
+        (function() {\
+            if (!window.__TAURI_INTERNALS__) return;\
+            try {\
+                window.__TAURI_INTERNALS__.invoke("get_privacy_stats").then(function(stats) {\
+                    if (!stats) return;\
+                    document.getElementById("blocked").textContent = stats.totalBlocked;\
+                    document.getElementById("ads").textContent = stats.totalBlocked;\
+                    document.getElementById("upgrades").textContent = stats.totalUpgrades;\
+                    var list = document.getElementById("domainList");\
+                    if (stats.topBlockedDomains && stats.topBlockedDomains.length > 0) {\
+                        list.innerHTML = "";\
+                        stats.topBlockedDomains.forEach(function(entry) {\
+                            var row = document.createElement("div");\
+                            row.className = "domain-row";\
+                            var name = document.createElement("span");\
+                            name.className = "domain-name";\
+                            name.textContent = entry[0];\
+                            var count = document.createElement("span");\
+                            count.className = "domain-count";\
+                            count.textContent = entry[1];\
+                            row.appendChild(name);\
+                            row.appendChild(count);\
+                            list.appendChild(row);\
+                        });\
+                    }\
+                }).catch(function() {});\
+            } catch(e) {}\
+        })();\
+    </script>\
+</body>\
+</html>');
+        document.close();
+    });
+    "#.to_string()
+}
+
+/// Generate JavaScript that replaces the page with the about page.
+fn generate_about_page_script() -> String {
+    r#"
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.location.href !== 'about:blank') return;
+        document.open();
+        document.write('<!DOCTYPE html>\
+<html>\
+<head>\
+    <meta charset="utf-8">\
+    <title>About — VoidBrowser</title>\
+    <style>\
+        * { margin: 0; padding: 0; box-sizing: border-box; }\
+        body {\
+            background: #171717;\
+            color: #f5f5f5;\
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\
+            display: flex;\
+            flex-direction: column;\
+            align-items: center;\
+            justify-content: center;\
+            min-height: 100vh;\
+            user-select: none;\
+            padding: 2rem;\
+        }\
+        h1 {\
+            font-size: 2.5rem;\
+            font-weight: 300;\
+            color: #e5e5e5;\
+            letter-spacing: 0.05em;\
+            margin-bottom: 0.5rem;\
+        }\
+        h1 span { color: #6366f1; }\
+        .version {\
+            color: #737373;\
+            font-size: 0.9rem;\
+            margin-bottom: 2.5rem;\
+        }\
+        .info-card {\
+            background: #262626;\
+            border-radius: 12px;\
+            padding: 2rem;\
+            max-width: 420px;\
+            width: 100%;\
+        }\
+        .info-row {\
+            display: flex;\
+            justify-content: space-between;\
+            padding: 0.6rem 0;\
+            border-bottom: 1px solid #404040;\
+            font-size: 0.85rem;\
+        }\
+        .info-row:last-child { border-bottom: none; }\
+        .info-label { color: #a3a3a3; }\
+        .info-value { color: #d4d4d4; }\
+        .privacy-pledge {\
+            margin-top: 2.5rem;\
+            text-align: center;\
+            max-width: 420px;\
+        }\
+        .privacy-pledge p {\
+            color: #6366f1;\
+            font-size: 1.1rem;\
+            font-weight: 500;\
+            margin-bottom: 0.5rem;\
+        }\
+        .privacy-pledge span {\
+            color: #525252;\
+            font-size: 0.8rem;\
+        }\
+    </style>\
+</head>\
+<body>\
+    <h1>Void<span>Browser</span></h1>\
+    <p class="version">Version 0.1.0</p>\
+    <div class="info-card">\
+        <div class="info-row">\
+            <span class="info-label">Built with</span>\
+            <span class="info-value">Tauri + Rust + SolidJS</span>\
+        </div>\
+        <div class="info-row">\
+            <span class="info-label">License</span>\
+            <span class="info-value">MPL-2.0</span>\
+        </div>\
+        <div class="info-row">\
+            <span class="info-label">Platform</span>\
+            <span class="info-value">Windows 10/11</span>\
+        </div>\
+        <div class="info-row">\
+            <span class="info-label">Engine</span>\
+            <span class="info-value">WebView2 (Chromium)</span>\
+        </div>\
+    </div>\
+    <div class="privacy-pledge">\
+        <p>We collect nothing. We never will.</p>\
+        <span>No telemetry. No analytics. No accounts. No cloud.</span>\
+    </div>\
 </body>\
 </html>');
         document.close();
