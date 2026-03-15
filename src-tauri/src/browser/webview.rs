@@ -182,18 +182,12 @@ fn setup_request_interception<R: Runtime>(
 
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2_2, ICoreWebView2Environment,
-        ICoreWebView2WebResourceRequestedEventArgs, COREWEBVIEW2_WEB_RESOURCE_CONTEXT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST,
+        ICoreWebView2WebResourceRequestedEventArgs,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
     };
-    use windows::core::Interface;
+    use windows::core::{Interface, HSTRING, PWSTR};
     use webview2_com::WebResourceRequestedEventHandler;
-    use windows::core::HSTRING;
-    use windows::Win32::System::WinRT::EventRegistrationToken;
+    type EventRegistrationToken = i64;
 
     webview
         .with_webview(move |wv| {
@@ -211,12 +205,9 @@ fn setup_request_interception<R: Runtime>(
                     .map_err(|e| format!("Failed to cast to ICoreWebView2_2: {e}"))?;
 
                 // Get the environment for creating responses
-                let mut env_ptr: Option<ICoreWebView2Environment> = None;
-                core2
-                    .Environment(&mut env_ptr)
+                let env: ICoreWebView2Environment = core2
+                    .Environment()
                     .map_err(|e| format!("Failed to get environment: {e}"))?;
-                let env = env_ptr
-                    .ok_or_else(|| "WebView2 environment is null".to_string())?;
 
                 // Register filter to intercept all HTTP/HTTPS requests
                 core.AddWebResourceRequestedFilter(
@@ -245,9 +236,12 @@ fn setup_request_interception<R: Runtime>(
                             // Get the request URL
                             let request = unsafe { args.Request() }
                                 .map_err(|e| format!("Failed to get request: {e}"))?;
-                            let uri = unsafe { request.Uri() }
-                                .map_err(|e| format!("Failed to get URI: {e}"))?;
-                            let url_str = uri.to_string();
+                            let url_str = unsafe {
+                                let mut uri = PWSTR::null();
+                                request.Uri(&mut uri)
+                                    .map_err(|e| format!("Failed to get URI: {e}"))?;
+                                uri.to_string()
+                            };
 
                             // Skip non-HTTP requests and data URIs
                             if !url_str.starts_with("http://")
@@ -258,16 +252,21 @@ fn setup_request_interception<R: Runtime>(
 
                             // Get the page URL from the sender webview as source_url
                             let source_url = if let Some(ref sender) = sender {
-                                unsafe { sender.Source() }
-                                    .map(|s| s.to_string())
+                                let mut url = PWSTR::null();
+                                unsafe { sender.Source(&mut url) }
+                                    .map(|_| url.to_string())
                                     .unwrap_or_default()
                             } else {
                                 String::new()
                             };
 
                             // Map WebView2 resource context to adblock resource type string
-                            let resource_context = unsafe { args.ResourceContext() }
-                                .map_err(|e| format!("Failed to get context: {e}"))?;
+                            let resource_context = unsafe {
+                                let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
+                                args.ResourceContext(&mut ctx)
+                                    .map_err(|e| format!("Failed to get context: {e}"))?;
+                                ctx
+                            };
                             let resource_type = map_resource_context(resource_context);
 
                             // Check the shield state and adblock engine
