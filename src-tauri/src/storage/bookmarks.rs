@@ -53,6 +53,7 @@ pub fn remove_bookmark(db: &Database, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)] // Used in Phase 7 for bookmark editing UI
 pub fn update_bookmark(
     db: &Database,
     id: &str,

@@ -1,5 +1,5 @@
 import { Show, onMount } from "solid-js";
-import { settingsOpen, setSettingsOpen } from "../../stores/sidebarStore";
+import { settingsOpen, closeSettings } from "../../stores/sidebarStore";
 import {
   settingsState,
   initializeSettingsStore,
@@ -69,7 +69,7 @@ export function SettingsPage() {
         class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
         style={{ top: "82px" }}
         onClick={(e) => {
-          if (e.target === e.currentTarget) setSettingsOpen(false);
+          if (e.target === e.currentTarget) closeSettings();
         }}
       >
         <div class="w-[420px] max-h-[80vh] bg-neutral-800 rounded-lg border border-neutral-700 shadow-xl overflow-hidden flex flex-col">
@@ -78,7 +78,7 @@ export function SettingsPage() {
             <h2 class="text-sm font-medium text-neutral-100">Settings</h2>
             <button
               class="w-6 h-6 flex items-center justify-center rounded hover:bg-neutral-600 text-neutral-400 hover:text-neutral-200"
-              onClick={() => setSettingsOpen(false)}
+              onClick={() => closeSettings()}
             >
               <svg class="w-4 h-4" viewBox="0 0 16 16" fill="none">
                 <path

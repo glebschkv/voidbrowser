@@ -53,6 +53,10 @@ pub fn run() {
             // History
             commands::search_history,
             commands::add_history_entry,
+            // Layout
+            commands::set_sidebar_open,
+            commands::set_settings_open,
+            commands::handle_keyboard_shortcut,
         ])
         .setup(|app| {
             // Initialize the ad blocker engine
