@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 /// Tracks domains the user has explicitly allowed over HTTP ("proceed anyway")
 /// and per-tab HTTPS upgrade counts for the privacy dashboard.
 /// All state is session-only and resets on browser close.
+#[allow(dead_code)]
 pub struct HttpsOnlyState {
     allowed_http_domains: HashSet<String>,
     upgrade_counts: HashMap<String, u64>,
@@ -13,6 +14,7 @@ pub struct HttpsOnlyState {
     pending_warnings: HashMap<String, String>,
 }
 
+#[allow(dead_code)]
 impl HttpsOnlyState {
     pub fn new() -> Self {
         Self {
@@ -75,12 +77,10 @@ impl HttpsOnlyState {
 
 /// Check if a URL should be upgraded from HTTP to HTTPS.
 /// Returns `Some(https_url)` if the URL uses `http://`, `None` otherwise.
+#[allow(dead_code)]
 pub fn should_upgrade(url: &str) -> Option<String> {
-    if url.starts_with("http://") {
-        Some(format!("https://{}", &url[7..]))
-    } else {
-        None
-    }
+    url.strip_prefix("http://")
+        .map(|rest| format!("https://{rest}"))
 }
 
 /// Extract the host/domain from a URL string.
