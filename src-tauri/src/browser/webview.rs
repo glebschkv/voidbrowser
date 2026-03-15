@@ -60,7 +60,7 @@ pub fn create_tab_webview<R: Runtime>(
     let is_new_tab = url == "void://newtab";
 
     let webview_url = if is_new_tab {
-        WebviewUrl::default()
+        WebviewUrl::External("about:blank".parse().expect("about:blank is a valid URL"))
     } else {
         WebviewUrl::External(
             url.parse()
