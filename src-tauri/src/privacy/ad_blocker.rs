@@ -35,6 +35,7 @@ impl AdBlocker {
             .chain(easyprivacy.lines())
             .map(String::from)
             .collect();
+        eprintln!("Ad blocker: loaded {} filter rules", rules.len());
         filter_set.add_filters(&rules, Default::default());
 
         let engine = Engine::from_filter_set(filter_set, true);

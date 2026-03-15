@@ -147,14 +147,16 @@ fn setup_request_interception<R: Runtime>(
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2, ICoreWebView2Environment, ICoreWebView2WebResourceRequestedEventArgs,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
-        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
+        ICoreWebView2, ICoreWebView2_2, ICoreWebView2Environment,
+        ICoreWebView2WebResourceRequestedEventArgs, COREWEBVIEW2_WEB_RESOURCE_CONTEXT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET,
         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST,
     };
+    use windows::core::Interface;
     use webview2_com::WebResourceRequestedEventHandler;
     use windows::core::HSTRING;
     use windows::Win32::System::WinRT::EventRegistrationToken;
@@ -169,9 +171,15 @@ fn setup_request_interception<R: Runtime>(
                     .CoreWebView2()
                     .map_err(|e| format!("Failed to get CoreWebView2: {e}"))?;
 
+                // Cast to ICoreWebView2_2 which exposes the Environment() method
+                let core2: ICoreWebView2_2 = core
+                    .cast::<ICoreWebView2_2>()
+                    .map_err(|e| format!("Failed to cast to ICoreWebView2_2: {e}"))?;
+
                 // Get the environment for creating responses
                 let mut env_ptr: Option<ICoreWebView2Environment> = None;
-                core.Environment(&mut env_ptr)
+                core2
+                    .Environment(&mut env_ptr)
                     .map_err(|e| format!("Failed to get environment: {e}"))?;
                 let env = env_ptr
                     .ok_or_else(|| "WebView2 environment is null".to_string())?;
