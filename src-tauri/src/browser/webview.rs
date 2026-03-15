@@ -345,7 +345,8 @@ fn setup_request_interception<R: Runtime>(
                                 }
                             };
 
-                            if !should_block {
+                            // Never block the main document — only block sub-resources
+                            if resource_type == "document" || !should_block {
                                 return;
                             }
 
@@ -385,7 +386,7 @@ fn setup_request_interception<R: Runtime>(
                             );
                         }));
 
-                        if let Err(_) = result {
+                        if result.is_err() {
                             eprintln!("[AdBlock] Handler panicked — letting request through");
                         }
                         // Always return Ok to COM so the webview stays alive
@@ -402,7 +403,7 @@ fn setup_request_interception<R: Runtime>(
                 eprintln!("[AdBlock] Request interception active for tab {tab_id_for_log}");
             }));
 
-            if let Err(_) = result {
+            if result.is_err() {
                 eprintln!("[AdBlock] Request interception setup panicked");
             }
         })
