@@ -15,6 +15,13 @@ impl Database {
     /// On first run this generates a new encryption key and creates the schema.
     /// The key is stored in the OS keychain with a file-based fallback.
     pub fn open(app_data_dir: &Path) -> Result<Self, String> {
+        let key = crypto::get_or_create_vault_key(app_data_dir)?;
+        Self::open_with_key(app_data_dir, &key)
+    }
+
+    /// Open the database with an explicit key (used by tests to avoid
+    /// keyring interference between parallel test runs).
+    fn open_with_key(app_data_dir: &Path, key: &[u8]) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir)
             .map_err(|e| format!("Failed to create app data dir: {e}"))?;
 
@@ -22,9 +29,7 @@ impl Database {
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("Failed to open database at {}: {e}", db_path.display()))?;
 
-        // Retrieve or generate the encryption key.
-        let key = crypto::get_or_create_vault_key(app_data_dir)?;
-        let hex_key = hex_encode(key.as_slice());
+        let hex_key = hex_encode(key);
 
         // Set the SQLCipher encryption key via PRAGMA.
         conn.execute_batch(&format!("PRAGMA key = \"x'{hex_key}'\";"))
@@ -112,9 +117,11 @@ mod tests {
 
     #[test]
     fn open_on_disk_roundtrip() {
+        // Use a fixed key to avoid keyring interference between tests.
+        let key = vec![0xAB_u8; 32];
         let dir = tempfile::TempDir::new().expect("tempdir");
         {
-            let db = Database::open(dir.path()).expect("first open");
+            let db = Database::open_with_key(dir.path(), &key).expect("first open");
             db.conn()
                 .execute(
                     "INSERT INTO settings (key, value) VALUES ('test_key', 'test_val')",
@@ -122,9 +129,9 @@ mod tests {
                 )
                 .expect("insert");
         }
-        // Re-open and verify data persists.
+        // Re-open with the same key and verify data persists.
         {
-            let db = Database::open(dir.path()).expect("second open");
+            let db = Database::open_with_key(dir.path(), &key).expect("second open");
             let val: String = db
                 .conn()
                 .query_row(
@@ -134,6 +141,12 @@ mod tests {
                 )
                 .expect("query");
             assert_eq!(val, "test_val");
+        }
+        // Opening with a WRONG key must fail.
+        {
+            let wrong_key = vec![0xCD_u8; 32];
+            let result = Database::open_with_key(dir.path(), &wrong_key);
+            assert!(result.is_err(), "wrong key should fail to open");
         }
     }
 
