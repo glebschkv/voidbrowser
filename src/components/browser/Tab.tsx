@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, createEffect } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "../shared/ContextMenu";
 
 interface TabProps {
@@ -19,6 +19,13 @@ export function Tab(props: TabProps) {
     x: number;
     y: number;
   } | null>(null);
+  const [faviconError, setFaviconError] = createSignal(false);
+
+  // Reset error state when favicon URL changes
+  createEffect(() => {
+    props.faviconUrl;
+    setFaviconError(false);
+  });
 
   const handleMouseDown = (e: MouseEvent) => {
     // Middle-click to close
@@ -70,7 +77,7 @@ export function Tab(props: TabProps) {
 
         {/* Favicon */}
         <Show
-          when={props.faviconUrl}
+          when={props.faviconUrl && !faviconError()}
           fallback={
             <svg
               class="w-3.5 h-3.5 flex-shrink-0 text-neutral-500"
@@ -91,6 +98,7 @@ export function Tab(props: TabProps) {
             src={props.faviconUrl!}
             class="w-3.5 h-3.5 flex-shrink-0"
             alt=""
+            onError={() => setFaviconError(true)}
           />
         </Show>
 

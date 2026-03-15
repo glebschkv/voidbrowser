@@ -45,6 +45,11 @@ async function setupListeners(): Promise<void> {
   await listen<string>("active-tab-changed", (event) => {
     setTabState("activeTabId", event.payload);
   });
+
+  await listen<{ tabId: string; url: string }>("tab-url-changed", (event) => {
+    const { tabId, url } = event.payload;
+    setTabState("tabs", (t) => t.id === tabId, "url", url);
+  });
 }
 
 // ── Initialize ───────────────────────────────────────────────────────
