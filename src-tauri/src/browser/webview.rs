@@ -80,7 +80,7 @@ pub fn create_tab_webview<R: Runtime>(
 
     // Inject fingerprint resistance script into ALL webviews (runs before any page JS)
     let fp_shield = window.app_handle().state::<FingerprintShield>();
-    builder = builder.initialization_script(&fp_shield.get_injection_script());
+    builder = builder.initialization_script(fp_shield.get_injection_script());
 
     // Inject cookie policy script to block third-party cookie access in iframes
     let cookie_script = cookie_policy::generate_cookie_policy_script();
