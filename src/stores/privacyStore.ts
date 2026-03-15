@@ -1,6 +1,6 @@
 import { createStore } from "solid-js/store";
 import { listen } from "@tauri-apps/api/event";
-import { getBlockedCount, toggleShield } from "../lib/ipc";
+import { toggleShield } from "../lib/ipc";
 
 interface PrivacyState {
   blockedCounts: Record<string, number>;
