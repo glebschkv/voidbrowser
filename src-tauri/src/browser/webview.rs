@@ -197,9 +197,12 @@ pub fn create_tab_webview<R: Runtime>(
                 let s = app_handle_for_history_nav.state::<Arc<Mutex<SessionHistory>>>();
                 Arc::clone(&*s)
             };
-            if let Ok(mut h) = history_arc.lock() {
-                h.add_entry(&url_str, "");
-            }
+            let mut guard = match history_arc.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            guard.add_entry(&url_str, "");
+            drop(guard);
 
             true
         })
@@ -227,9 +230,12 @@ pub fn create_tab_webview<R: Runtime>(
                     let s = app_handle_for_history_title.state::<Arc<Mutex<SessionHistory>>>();
                     Arc::clone(&*s)
                 };
-                if let Ok(mut h) = history_arc.lock() {
-                    h.update_title(&url, &title);
-                }
+                let mut guard = match history_arc.lock() {
+                    Ok(g) => g,
+                    Err(e) => e.into_inner(),
+                };
+                guard.update_title(&url, &title);
+                drop(guard);
             }
         })
         .on_page_load(move |webview, payload| {
