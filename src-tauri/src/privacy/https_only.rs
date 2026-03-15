@@ -110,8 +110,9 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
         .replace('>', "&gt;")
         .replace('"', "&quot;");
 
-    format!(
-        r#"
+    // Build the script using .replace() instead of format!() to avoid issues
+    // with `#` in HTML color codes being interpreted as Rust raw string prefixes.
+    let template = r##"
         document.open();
         document.write(`<!DOCTYPE html>
 <html>
@@ -119,8 +120,8 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
     <meta charset="utf-8">
     <title>Connection Not Secure</title>
     <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
             background: #171717;
             color: #f5f5f5;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -131,19 +132,19 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
             height: 100vh;
             user-select: none;
             padding: 2rem;
-        }}
-        .warning-icon {{
+        }
+        .warning-icon {
             width: 64px;
             height: 64px;
             margin-bottom: 1.5rem;
-        }}
-        h1 {{
+        }
+        h1 {
             font-size: 1.5rem;
             font-weight: 600;
             margin-bottom: 1rem;
             color: #fbbf24;
-        }}
-        .domain {{
+        }
+        .domain {
             font-family: monospace;
             font-size: 1.1rem;
             color: #a3a3a3;
@@ -151,20 +152,20 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
             padding: 0.5rem 1rem;
             border-radius: 6px;
             margin-bottom: 1.5rem;
-        }}
-        p {{
+        }
+        p {
             color: #a3a3a3;
             font-size: 0.9rem;
             max-width: 480px;
             text-align: center;
             line-height: 1.5;
             margin-bottom: 2rem;
-        }}
-        .buttons {{
+        }
+        .buttons {
             display: flex;
             gap: 1rem;
-        }}
-        button {{
+        }
+        button {
             padding: 10px 24px;
             border-radius: 6px;
             border: none;
@@ -172,23 +173,23 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
             cursor: pointer;
             font-weight: 500;
             transition: background 0.2s;
-        }}
-        .btn-back {{
+        }
+        .btn-back {
             background: #6366f1;
             color: white;
-        }}
-        .btn-back:hover {{
+        }
+        .btn-back:hover {
             background: #818cf8;
-        }}
-        .btn-proceed {{
+        }
+        .btn-proceed {
             background: #262626;
             color: #a3a3a3;
             border: 1px solid #404040;
-        }}
-        .btn-proceed:hover {{
+        }
+        .btn-proceed:hover {
             background: #404040;
             color: #f5f5f5;
-        }}
+        }
     </style>
 </head>
 <body>
@@ -198,7 +199,7 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
         <circle cx="12" cy="18" r="0.5" fill="#fbbf24"/>
     </svg>
     <h1>Connection Not Secure</h1>
-    <div class="domain">{escaped_domain}</div>
+    <div class="domain">__VOID_DOMAIN__</div>
     <p>
         This site is not available over a secure (HTTPS) connection.
         Your connection to this site is not encrypted, which means information
@@ -209,20 +210,24 @@ pub fn generate_https_warning_page(original_http_url: &str, tab_id: &str) -> Str
         <button class="btn-proceed" onclick="proceedHttp()">Proceed to HTTP Site</button>
     </div>
     <script>
-        function proceedHttp() {{
-            if (window.__TAURI__ && window.__TAURI__.core) {{
-                window.__TAURI__.core.invoke('allow_http_and_navigate', {{
-                    tabId: '{escaped_tab_id}',
-                    url: '{escaped_url}'
-                }});
-            }}
-        }}
+        function proceedHttp() {
+            if (window.__TAURI__ && window.__TAURI__.core) {
+                window.__TAURI__.core.invoke('allow_http_and_navigate', {
+                    tabId: '__VOID_TAB_ID__',
+                    url: '__VOID_URL__'
+                });
+            }
+        }
     </script>
 </body>
 </html>`);
         document.close();
-        "#
-    )
+        "##;
+
+    template
+        .replace("__VOID_DOMAIN__", &escaped_domain)
+        .replace("__VOID_TAB_ID__", &escaped_tab_id)
+        .replace("__VOID_URL__", &escaped_url)
 }
 
 #[cfg(test)]
