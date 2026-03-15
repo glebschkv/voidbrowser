@@ -15,6 +15,18 @@ VoidBrowser is a zero-tracking privacy browser for Windows. It collects nothing 
 
 ---
 
+## LINUX BUILD DEPENDENCIES (CI / Dev Environment)
+
+Before building on Linux, install these packages (required by Tauri/wry even though VoidBrowser targets Windows):
+
+```bash
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
+```
+
+A SessionStart hook in `.claude/hooks.json` auto-installs these in Claude Code web sessions.
+
+---
+
 ## TECH STACK (DO NOT CHANGE)
 
 | Layer | Technology | Version |
