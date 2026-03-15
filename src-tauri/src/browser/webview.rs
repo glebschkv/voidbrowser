@@ -13,6 +13,7 @@ use crate::privacy::ad_blocker::ShieldState;
 use crate::privacy::cookie_policy;
 use crate::privacy::fingerprint::FingerprintShield;
 use crate::privacy::https_only::{self, HttpsOnlyState};
+use crate::storage::history::SessionHistory;
 
 /// Height of the toolbar area in logical pixels (36px tab bar + 46px toolbar).
 pub const TOOLBAR_HEIGHT: f64 = 82.0;
@@ -62,6 +63,8 @@ pub fn create_tab_webview<R: Runtime>(
     let app_handle_for_nav = window.app_handle().clone();
     let app_handle_for_title = window.app_handle().clone();
     let app_handle_for_load = window.app_handle().clone();
+    let app_handle_for_history_nav = window.app_handle().clone();
+    let app_handle_for_history_title = window.app_handle().clone();
 
     let is_new_tab = url == "void://newtab";
 
@@ -189,24 +192,40 @@ pub fn create_tab_webview<R: Runtime>(
                 let _ = app_handle_for_nav.emit("tab-updated", &info);
             }
 
+            // Record navigation in session history
+            let history_state =
+                app_handle_for_history_nav.state::<Arc<Mutex<SessionHistory>>>();
+            if let Ok(mut h) = history_state.lock() {
+                h.add_entry(&url_str, "");
+            }
+
             true
         })
         .on_document_title_changed(move |_webview, title| {
             // Update TabManager state
             let tab_mgr = app_handle_for_title.state::<Arc<Mutex<TabManager>>>();
-            let tab_info = if let Ok(mut mgr) = tab_mgr.lock() {
+            let (tab_info, tab_url) = if let Ok(mut mgr) = tab_mgr.lock() {
                 if let Some(tab) = mgr.get_tab_mut(&tab_id_for_title) {
                     tab.title = title.clone();
-                    Some(tab.to_info())
+                    (Some(tab.to_info()), Some(tab.url.clone()))
                 } else {
-                    None
+                    (None, None)
                 }
             } else {
-                None
+                (None, None)
             };
 
             if let Some(info) = tab_info {
                 let _ = app_handle_for_title.emit("tab-updated", &info);
+            }
+
+            // Update session history entry title
+            if let Some(url) = tab_url {
+                let history_state =
+                    app_handle_for_history_title.state::<Arc<Mutex<SessionHistory>>>();
+                if let Ok(mut h) = history_state.lock() {
+                    h.update_title(&url, &title);
+                }
             }
         })
         .on_page_load(move |webview, payload| {

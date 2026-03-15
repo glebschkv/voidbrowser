@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -7,6 +8,10 @@ use crate::browser::tabs::{Tab, TabInfo, TabManager};
 use crate::browser::webview;
 use crate::privacy::ad_blocker::ShieldState;
 use crate::privacy::https_only::{self, HttpsOnlyState};
+use crate::storage::bookmarks::{self, Bookmark};
+use crate::storage::database::Database;
+use crate::storage::history::{HistoryEntry, SessionHistory};
+use crate::storage::settings;
 
 /// Helper: get the webview label for a tab id.
 fn webview_label(tab_id: &str) -> String {
@@ -179,7 +184,18 @@ pub async fn navigate_to<R: Runtime>(
     tab_id: String,
     input: String,
 ) -> Result<(), String> {
-    let url_string = navigation::resolve_input(&input);
+    // Resolve URL using the user's configured search engine.
+    let url_string = {
+        let db = app.state::<Arc<Mutex<Database>>>();
+        let search_template = match db.lock() {
+            Ok(db) => {
+                let engine = settings::get_setting_or_default(&db, "search_engine");
+                settings::search_engine_url(&engine).to_string()
+            }
+            Err(_) => settings::search_engine_url("duckduckgo").to_string(),
+        };
+        navigation::resolve_input_with_engine(&input, &search_template)
+    };
     let parsed: url::Url = url_string.parse().map_err(|e: url::ParseError| e.to_string())?;
 
     let label = webview_label(&tab_id);
@@ -348,5 +364,105 @@ pub async fn get_site_shield_status<R: Runtime>(
     let shield = app.state::<Arc<Mutex<ShieldState>>>();
     let state = shield.lock().map_err(|e| e.to_string())?;
     Ok(!state.is_site_disabled(&domain))
+}
+
+// ── Bookmark commands ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn add_bookmark<R: Runtime>(
+    app: AppHandle<R>,
+    url: String,
+    title: String,
+    folder: Option<String>,
+) -> Result<Bookmark, String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    bookmarks::add_bookmark(&db, &url, &title, folder.as_deref())
+}
+
+#[tauri::command]
+pub async fn remove_bookmark<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+) -> Result<(), String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    bookmarks::remove_bookmark(&db, &id)
+}
+
+#[tauri::command]
+pub async fn get_bookmarks<R: Runtime>(
+    app: AppHandle<R>,
+    folder: Option<String>,
+) -> Result<Vec<Bookmark>, String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    bookmarks::get_bookmarks(&db, folder.as_deref())
+}
+
+#[tauri::command]
+pub async fn search_bookmarks<R: Runtime>(
+    app: AppHandle<R>,
+    query: String,
+) -> Result<Vec<Bookmark>, String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    bookmarks::search_bookmarks(&db, &query)
+}
+
+// ── Settings commands ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_setting<R: Runtime>(
+    app: AppHandle<R>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    settings::get_setting(&db, &key)
+}
+
+#[tauri::command]
+pub async fn set_setting<R: Runtime>(
+    app: AppHandle<R>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    settings::set_setting(&db, &key, &value)
+}
+
+#[tauri::command]
+pub async fn get_all_settings<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<HashMap<String, String>, String> {
+    let db = app.state::<Arc<Mutex<Database>>>();
+    let db = db.lock().map_err(|e| e.to_string())?;
+    settings::get_all_settings(&db)
+}
+
+// ── History commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn search_history<R: Runtime>(
+    app: AppHandle<R>,
+    query: String,
+) -> Result<Vec<HistoryEntry>, String> {
+    let history = app.state::<Arc<Mutex<SessionHistory>>>();
+    let h = history.lock().map_err(|e| e.to_string())?;
+    Ok(h.search(&query))
+}
+
+#[tauri::command]
+pub async fn add_history_entry<R: Runtime>(
+    app: AppHandle<R>,
+    url: String,
+    title: String,
+) -> Result<(), String> {
+    let history = app.state::<Arc<Mutex<SessionHistory>>>();
+    let mut h = history.lock().map_err(|e| e.to_string())?;
+    h.add_entry(&url, &title);
+    Ok(())
 }
 
