@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import { tabState } from "../../stores/tabStore";
 import { getBlockedCountForTab, isSiteShieldDisabled } from "../../stores/privacyStore";
 import { SitePermissions } from "./SitePermissions";
+import { setSettingsOpen } from "../../lib/ipc";
 
 function extractDomain(url: string): string {
   try {
@@ -37,7 +38,10 @@ export function ShieldIcon() {
   const shieldColor = () => (isDisabled() ? "text-neutral-500" : "text-green-400");
 
   const handleClick = () => {
-    setShowDropdown((prev) => !prev);
+    const willOpen = !showDropdown();
+    setShowDropdown(willOpen);
+    // Hide/show the content webview so the dropdown isn't covered by it
+    setSettingsOpen(willOpen).catch(console.error);
   };
 
   return (
@@ -78,7 +82,10 @@ export function ShieldIcon() {
         )}
       </button>
       <Show when={showDropdown()}>
-        <SitePermissions onClose={() => setShowDropdown(false)} />
+        <SitePermissions onClose={() => {
+          setShowDropdown(false);
+          setSettingsOpen(false).catch(console.error);
+        }} />
       </Show>
     </div>
   );
