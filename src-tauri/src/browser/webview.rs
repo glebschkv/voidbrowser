@@ -230,7 +230,7 @@ fn setup_request_interception<R: Runtime>(
                         let result = catch_unwind(AssertUnwindSafe(|| {
                             let args = match args {
                                 Some(a) => a,
-                                None => return Ok(()),
+                                None => return Ok::<(), String>(()),
                             };
 
                             // Get the request URL
