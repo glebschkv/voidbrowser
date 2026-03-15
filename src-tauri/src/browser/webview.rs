@@ -747,7 +747,7 @@ fn generate_new_tab_page_script() -> String {
         <input type="text" placeholder="Search the web or enter a URL" autofocus id="searchInput" />\
     </div>\
     <div id="bookmarksGrid" class="bookmarks-grid"></div>\
-    <p id="statsFooter" class="stats-footer">Your browser. Your data. Nobody\\x27s else\\x27s.</p>\
+    <p id="statsFooter" class="stats-footer">Your browser. Your data. Nobody else&apos;s.</p>\
     <script>\
         document.getElementById("searchInput").addEventListener("keydown", function(e) {\
             if (e.key === "Enter" && this.value.trim()) {\
