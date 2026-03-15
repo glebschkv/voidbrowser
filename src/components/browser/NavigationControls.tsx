@@ -1,4 +1,5 @@
-import { goBack, goForward, reloadPage, createTab } from "../../lib/ipc";
+import { goBack, goForward, reloadPage, navigateTo } from "../../lib/ipc";
+import { tabState } from "../../stores/tabStore";
 
 export function NavigationControls() {
   const handleBack = () => {
@@ -14,7 +15,10 @@ export function NavigationControls() {
   };
 
   const handleHome = () => {
-    createTab("https://duckduckgo.com").catch(console.error);
+    const activeId = tabState.activeTabId;
+    if (activeId) {
+      navigateTo(activeId, "about:blank").catch(console.error);
+    }
   };
 
   return (

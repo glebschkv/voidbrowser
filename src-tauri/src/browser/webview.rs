@@ -15,6 +15,26 @@ pub fn tab_webview_label(tab_id: &str) -> String {
     format!("tab-{tab_id}")
 }
 
+/// Derive a favicon URL from a page URL (uses /favicon.ico at the origin).
+fn derive_favicon_url(page_url: &str) -> Option<String> {
+    let parsed: url::Url = page_url.parse().ok()?;
+    let origin = parsed.origin();
+    match origin {
+        url::Origin::Tuple(scheme, host, port) => {
+            let default_port = matches!(
+                (scheme.as_str(), port),
+                ("http", 80) | ("https", 443)
+            );
+            if default_port {
+                Some(format!("{scheme}://{host}/favicon.ico"))
+            } else {
+                Some(format!("{scheme}://{host}:{port}/favicon.ico"))
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Create a webview for a tab, positioned below the toolbar area.
 pub fn create_tab_webview<R: Runtime>(
     window: &Window<R>,
@@ -45,18 +65,33 @@ pub fn create_tab_webview<R: Runtime>(
         )
     };
 
-    let builder = WebviewBuilder::new(&label, webview_url)
-        .auto_resize()
+    let mut builder = WebviewBuilder::new(&label, webview_url)
+        .auto_resize();
+
+    // For new tab pages, inject HTML via initialization_script (runs before page content loads)
+    if is_new_tab {
+        let new_tab_script = generate_new_tab_page_script();
+        builder = builder.initialization_script(&new_tab_script);
+    }
+
+    let builder = builder
         .on_navigation(move |nav_url| {
             let url_str = nav_url.to_string();
+            let favicon = derive_favicon_url(&url_str);
 
             // Update TabManager state
             let tab_mgr = app_handle_for_nav.state::<Arc<Mutex<TabManager>>>();
-            if let Ok(mut mgr) = tab_mgr.lock() {
+            let tab_info = if let Ok(mut mgr) = tab_mgr.lock() {
                 if let Some(tab) = mgr.get_tab_mut(&tab_id_for_nav) {
                     tab.url = url_str.clone();
+                    tab.favicon_url = favicon;
+                    Some(tab.to_info())
+                } else {
+                    None
                 }
-            }
+            } else {
+                None
+            };
 
             let _ = app_handle_for_nav.emit(
                 "tab-url-changed",
@@ -65,6 +100,11 @@ pub fn create_tab_webview<R: Runtime>(
                     "url": url_str
                 }),
             );
+
+            if let Some(info) = tab_info {
+                let _ = app_handle_for_nav.emit("tab-updated", &info);
+            }
+
             true
         })
         .on_document_title_changed(move |_webview, title| {
@@ -99,105 +139,103 @@ pub fn create_tab_webview<R: Runtime>(
         let _ = webview.hide();
     }
 
-    // For new tab page, inject the HTML content
-    if is_new_tab {
-        let new_tab_html = generate_new_tab_page_script();
-        let _ = webview.eval(&new_tab_html);
-    }
-
     Ok(webview)
 }
 
-/// Generate JavaScript that replaces the page with our new tab content.
+/// Generate JavaScript that replaces the page with new tab content.
+/// Used as an initialization_script so it runs reliably before page content loads.
 fn generate_new_tab_page_script() -> String {
     r#"
-    document.open();
-    document.write(`<!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>New Tab</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-                background: #171717;
-                color: #f5f5f5;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100vh;
-                user-select: none;
-            }
-            h1 {
-                font-size: 2.5rem;
-                font-weight: 300;
-                margin-bottom: 2rem;
-                color: #e5e5e5;
-                letter-spacing: 0.05em;
-            }
-            h1 span {
-                color: #6366f1;
-            }
-            .search-container {
-                width: 100%;
-                max-width: 580px;
-                position: relative;
-            }
-            input {
-                width: 100%;
-                padding: 14px 20px;
-                background: #262626;
-                border: 1px solid #404040;
-                border-radius: 8px;
-                color: #f5f5f5;
-                font-size: 1rem;
-                outline: none;
-                transition: border-color 0.2s;
-            }
-            input:focus {
-                border-color: #6366f1;
-            }
-            input::placeholder {
-                color: #737373;
-            }
-            .tagline {
-                margin-top: 3rem;
-                color: #525252;
-                font-size: 0.85rem;
-            }
-        </style>
-    </head>
-    <body>
-        <h1>Void<span>Browser</span></h1>
-        <div class="search-container">
-            <input
-                type="text"
-                placeholder="Search the web or enter a URL"
-                autofocus
-                id="searchInput"
-            />
-        </div>
-        <p class="tagline">Your browser. Your data. Nobody else's.</p>
-        <script>
-            document.getElementById('searchInput').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && this.value.trim()) {
-                    const val = this.value.trim();
-                    if (val.includes('.') && !val.includes(' ')) {
-                        if (val.startsWith('http://') || val.startsWith('https://')) {
-                            window.location.href = val;
-                        } else {
-                            window.location.href = 'https://' + val;
-                        }
-                    } else {
-                        window.location.href = 'https://duckduckgo.com/?q=' + encodeURIComponent(val);
-                    }
-                }
-            });
-        </script>
-    </body>
-    </html>`);
-    document.close();
+    document.addEventListener('DOMContentLoaded', function() {
+        document.open();
+        document.write('\
+<!DOCTYPE html>\
+<html>\
+<head>\
+    <meta charset="utf-8">\
+    <title>New Tab</title>\
+    <style>\
+        * { margin: 0; padding: 0; box-sizing: border-box; }\
+        body {\
+            background: #171717;\
+            color: #f5f5f5;\
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;\
+            display: flex;\
+            flex-direction: column;\
+            align-items: center;\
+            justify-content: center;\
+            height: 100vh;\
+            user-select: none;\
+        }\
+        h1 {\
+            font-size: 2.5rem;\
+            font-weight: 300;\
+            margin-bottom: 2rem;\
+            color: #e5e5e5;\
+            letter-spacing: 0.05em;\
+        }\
+        h1 span {\
+            color: #6366f1;\
+        }\
+        .search-container {\
+            width: 100%;\
+            max-width: 580px;\
+            position: relative;\
+        }\
+        input {\
+            width: 100%;\
+            padding: 14px 20px;\
+            background: #262626;\
+            border: 1px solid #404040;\
+            border-radius: 8px;\
+            color: #f5f5f5;\
+            font-size: 1rem;\
+            outline: none;\
+            transition: border-color 0.2s;\
+        }\
+        input:focus {\
+            border-color: #6366f1;\
+        }\
+        input::placeholder {\
+            color: #737373;\
+        }\
+        .tagline {\
+            margin-top: 3rem;\
+            color: #525252;\
+            font-size: 0.85rem;\
+        }\
+    </style>\
+</head>\
+<body>\
+    <h1>Void<span>Browser</span></h1>\
+    <div class="search-container">\
+        <input\
+            type="text"\
+            placeholder="Search the web or enter a URL"\
+            autofocus\
+            id="searchInput"\
+        />\
+    </div>\
+    <p class="tagline">Your browser. Your data. Nobody else\'s.</p>\
+    <script>\
+        document.getElementById("searchInput").addEventListener("keydown", function(e) {\
+            if (e.key === "Enter" && this.value.trim()) {\
+                var val = this.value.trim();\
+                if (val.includes(".") && !val.includes(" ")) {\
+                    if (val.startsWith("http://") || val.startsWith("https://")) {\
+                        window.location.href = val;\
+                    } else {\
+                        window.location.href = "https://" + val;\
+                    }\
+                } else {\
+                    window.location.href = "https://duckduckgo.com/?q=" + encodeURIComponent(val);\
+                }\
+            }\
+        });\
+    </script>\
+</body>\
+</html>');
+        document.close();
+    });
     "#.to_string()
 }
