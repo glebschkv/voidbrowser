@@ -17,7 +17,7 @@ export function NavigationControls() {
   const handleHome = () => {
     const activeId = tabState.activeTabId;
     if (activeId) {
-      navigateTo(activeId, "about:blank").catch(console.error);
+      navigateTo(activeId, "void://newtab").catch(console.error);
     }
   };
 
