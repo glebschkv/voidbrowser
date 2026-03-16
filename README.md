@@ -1,5 +1,6 @@
 # VoidBrowser
-** made with claude. **
+**Made with claude.**
+
 **Your browser. Your data. Nobody else's.**
 
 
