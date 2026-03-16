@@ -22,6 +22,7 @@ pub fn resolve_input_with_engine(input: &str, search_url_template: &str) -> Stri
         || trimmed.starts_with("https://")
         || trimmed.starts_with("about:")
         || trimmed.starts_with("data:")
+        || trimmed.starts_with("void://")
     {
         return trimmed.to_string();
     }
@@ -137,6 +138,13 @@ mod tests {
             resolve_input_with_engine("rust lang", "https://www.google.com/search?q=%s");
         assert!(result.starts_with("https://www.google.com/search?q="));
         assert!(result.contains("rust"));
+    }
+
+    #[test]
+    fn test_void_scheme_passthrough() {
+        assert_eq!(resolve_input("void://newtab"), "void://newtab");
+        assert_eq!(resolve_input("void://privacy"), "void://privacy");
+        assert_eq!(resolve_input("void://about"), "void://about");
     }
 
     #[test]
