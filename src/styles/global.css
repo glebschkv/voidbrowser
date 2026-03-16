@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@theme {
+  --color-neutral-900: #171717;
+  --color-neutral-800: #262626;
+  --color-neutral-700: #404040;
+  --color-neutral-600: #525252;
+  --color-neutral-500: #737373;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-100: #f5f5f5;
+  --color-accent: #6366f1;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--color-neutral-900);
+  color: var(--color-neutral-100);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Make the app non-draggable by default, toolbar drag region handled separately */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-neutral-900);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-600);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-500);
+}
+
+/* Focus ring for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Don't show focus ring on mouse clicks for buttons */
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Spinner animation */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Tab open/close animation */
+[data-tab] {
+  animation: tab-open 0.15s ease-out;
+}
+
+@keyframes tab-open {
+  from {
+    opacity: 0;
+    max-width: 0;
+  }
+  to {
+    opacity: 1;
+    max-width: 200px;
+  }
+}
