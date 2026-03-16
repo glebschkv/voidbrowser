@@ -11,6 +11,13 @@ import {
   type Suggestion,
 } from "../../stores/navigationStore";
 
+// On Windows, WebView2 rewrites void://X to http://void.X/ — normalize back.
+function normalizeVoidUrl(rawUrl: string): string {
+  const match = rawUrl.match(/^https?:\/\/void\.(\w+)\/?$/);
+  if (match) return `void://${match[1]}`;
+  return rawUrl;
+}
+
 export function AddressBar() {
   const [url, setUrl] = createSignal("");
   const [isEditing, setIsEditing] = createSignal(false);
@@ -26,7 +33,7 @@ export function AddressBar() {
       "tab-url-changed",
       (event) => {
         if (event.payload.tabId === tabState.activeTabId && !isEditing()) {
-          setUrl(event.payload.url);
+          setUrl(normalizeVoidUrl(event.payload.url));
         }
       }
     );
@@ -43,12 +50,12 @@ export function AddressBar() {
 
     const activeTab = tabState.tabs.find((t) => t.id === activeId);
     if (activeTab) {
-      setUrl(activeTab.url);
+      setUrl(normalizeVoidUrl(activeTab.url));
     }
 
     getCurrentUrl()
       .then((u) => {
-        if (!isEditing()) setUrl(u);
+        if (!isEditing()) setUrl(normalizeVoidUrl(u));
       })
       .catch(() => {});
   });
