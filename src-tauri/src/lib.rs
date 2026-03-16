@@ -9,6 +9,7 @@ use std::time::Instant;
 use tauri::Manager;
 
 use browser::tabs::{Tab, TabManager};
+use browser::webview;
 use privacy::ad_blocker::{AdBlocker, ShieldState};
 use privacy::fingerprint::FingerprintShield;
 use privacy::https_only::HttpsOnlyState;
@@ -69,6 +70,27 @@ pub fn run() {
             commands::zoom_out,
             commands::zoom_reset,
         ])
+        .register_uri_scheme_protocol("void", |_ctx, request| {
+            let path = request.uri().path().trim_start_matches('/');
+            let host = request.uri().host().unwrap_or("");
+            // The page identifier can be in the host (void://newtab) or
+            // path (void://localhost/newtab) depending on platform.
+            let page = if !path.is_empty() && path != "/" {
+                path
+            } else {
+                host
+            };
+            let html = match page {
+                "newtab" | "" => webview::new_tab_page_html(),
+                "privacy" => webview::privacy_dashboard_html(),
+                "about" => webview::about_page_html(),
+                _ => webview::new_tab_page_html(),
+            };
+            tauri::http::Response::builder()
+                .header("Content-Type", "text/html; charset=utf-8")
+                .body(html.into_bytes())
+                .expect("failed to build void:// response")
+        })
         .setup(|app| {
             // Initialize the ad blocker engine
             let start = Instant::now();
