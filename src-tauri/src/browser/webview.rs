@@ -642,7 +642,8 @@ const KEYBOARD_SHORTCUT_SCRIPT: &str = r#"
 /// Used as an initialization_script so it runs reliably before page content loads.
 fn generate_new_tab_page_script() -> String {
     r#"
-    document.addEventListener('DOMContentLoaded', function() {
+    (function() {
+    function inject() {
         if (window.location.href !== 'about:blank') return;
         document.open();
         document.write('<!DOCTYPE html>\
@@ -805,14 +806,21 @@ fn generate_new_tab_page_script() -> String {
 </body>\
 </html>');
         document.close();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject);
+    } else {
+        inject();
+    }
+    })();
     "#.to_string()
 }
 
 /// Generate JavaScript that replaces the page with the privacy dashboard.
 fn generate_privacy_dashboard_script() -> String {
     r#"
-    document.addEventListener('DOMContentLoaded', function() {
+    (function() {
+    function inject() {
         if (window.location.href !== 'about:blank') return;
         document.open();
         document.write('<!DOCTYPE html>\
@@ -964,14 +972,21 @@ fn generate_privacy_dashboard_script() -> String {
 </body>\
 </html>');
         document.close();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject);
+    } else {
+        inject();
+    }
+    })();
     "#.to_string()
 }
 
 /// Generate JavaScript that replaces the page with the about page.
 fn generate_about_page_script() -> String {
     r#"
-    document.addEventListener('DOMContentLoaded', function() {
+    (function() {
+    function inject() {
         if (window.location.href !== 'about:blank') return;
         document.open();
         document.write('<!DOCTYPE html>\
@@ -1068,6 +1083,12 @@ fn generate_about_page_script() -> String {
 </body>\
 </html>');
         document.close();
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject);
+    } else {
+        inject();
+    }
+    })();
     "#.to_string()
 }
