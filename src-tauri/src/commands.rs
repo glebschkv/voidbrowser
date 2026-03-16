@@ -207,6 +207,30 @@ pub async fn navigate_to<R: Runtime>(
         };
         navigation::resolve_input_with_engine(&input, &search_template)
     };
+    // For void:// pages, recreate the webview so initialization scripts
+    // inject the page HTML (they only run on webview creation, not on
+    // subsequent navigations).
+    if url_string.starts_with("void://") {
+        let label = webview_label(&tab_id);
+        if let Some(wv) = app.get_webview(&label) {
+            let _ = wv.close();
+        }
+
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "Main window not found".to_string())?;
+        webview::create_tab_webview(&window, &tab_id, &url_string, true)?;
+
+        let tab_mgr = app.state::<Arc<Mutex<TabManager>>>();
+        if let Ok(mut mgr) = tab_mgr.lock() {
+            if let Some(tab) = mgr.get_tab_mut(&tab_id) {
+                tab.url = url_string;
+            }
+        }
+
+        return Ok(());
+    }
+
     let parsed: url::Url = url_string.parse().map_err(|e: url::ParseError| e.to_string())?;
 
     let label = webview_label(&tab_id);
