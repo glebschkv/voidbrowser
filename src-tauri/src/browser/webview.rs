@@ -66,19 +66,10 @@ pub fn create_tab_webview<R: Runtime>(
     let app_handle_for_history_nav = window.app_handle().clone();
     let app_handle_for_history_title = window.app_handle().clone();
 
-    let is_void_page = url.starts_with("void://");
-    let is_new_tab = url == "void://newtab";
-    let is_privacy = url == "void://privacy";
-    let is_about = url == "void://about";
-
-    let webview_url = if is_void_page {
-        WebviewUrl::External("about:blank".parse().expect("about:blank is a valid URL"))
-    } else {
-        WebviewUrl::External(
-            url.parse()
-                .map_err(|e: url::ParseError| e.to_string())?,
-        )
-    };
+    let webview_url = WebviewUrl::External(
+        url.parse()
+            .map_err(|e: url::ParseError| e.to_string())?,
+    );
 
     let mut builder = WebviewBuilder::new(&label, webview_url)
         .auto_resize()
@@ -95,18 +86,6 @@ pub fn create_tab_webview<R: Runtime>(
     // Inject keyboard shortcut capture script so shortcuts work when
     // focus is in the content webview (not the toolbar).
     builder = builder.initialization_script(KEYBOARD_SHORTCUT_SCRIPT);
-
-    // For void:// pages, inject HTML via initialization_script
-    if is_new_tab {
-        let new_tab_script = generate_new_tab_page_script();
-        builder = builder.initialization_script(&new_tab_script);
-    } else if is_privacy {
-        let privacy_script = generate_privacy_dashboard_script();
-        builder = builder.initialization_script(&privacy_script);
-    } else if is_about {
-        let about_script = generate_about_page_script();
-        builder = builder.initialization_script(&about_script);
-    }
 
     // Clone label for use in on_navigation closure to look up the webview
     let label_for_nav = label.clone();
@@ -638,15 +617,9 @@ const KEYBOARD_SHORTCUT_SCRIPT: &str = r#"
 })();
 "#;
 
-/// Generate JavaScript that replaces the page with new tab content.
-/// Used as an initialization_script so it runs reliably before page content loads.
-fn generate_new_tab_page_script() -> String {
-    r#"
-    (function() {
-    function inject() {
-        if (window.location.href !== 'about:blank') return;
-        document.open();
-        document.write('<!DOCTYPE html>\
+/// Return the full HTML for the new tab page, served via the `void://` protocol.
+pub fn new_tab_page_html() -> String {
+    r#"<!DOCTYPE html>\
 <html>\
 <head>\
     <meta charset="utf-8">\
@@ -804,26 +777,12 @@ fn generate_new_tab_page_script() -> String {
         })();\
     </script>\
 </body>\
-</html>');
-        document.close();
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', inject);
-    } else {
-        inject();
-    }
-    })();
-    "#.to_string()
+</html>"#.to_string()
 }
 
-/// Generate JavaScript that replaces the page with the privacy dashboard.
-fn generate_privacy_dashboard_script() -> String {
-    r#"
-    (function() {
-    function inject() {
-        if (window.location.href !== 'about:blank') return;
-        document.open();
-        document.write('<!DOCTYPE html>\
+/// Return the full HTML for the privacy dashboard page.
+pub fn privacy_dashboard_html() -> String {
+    r#"<!DOCTYPE html>\
 <html>\
 <head>\
     <meta charset="utf-8">\
@@ -970,26 +929,12 @@ fn generate_privacy_dashboard_script() -> String {
         })();\
     </script>\
 </body>\
-</html>');
-        document.close();
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', inject);
-    } else {
-        inject();
-    }
-    })();
-    "#.to_string()
+</html>"#.to_string()
 }
 
-/// Generate JavaScript that replaces the page with the about page.
-fn generate_about_page_script() -> String {
-    r#"
-    (function() {
-    function inject() {
-        if (window.location.href !== 'about:blank') return;
-        document.open();
-        document.write('<!DOCTYPE html>\
+/// Return the full HTML for the about page.
+pub fn about_page_html() -> String {
+    r#"<!DOCTYPE html>\
 <html>\
 <head>\
     <meta charset="utf-8">\
@@ -1081,14 +1026,5 @@ fn generate_about_page_script() -> String {
         <span>No telemetry. No analytics. No accounts. No cloud.</span>\
     </div>\
 </body>\
-</html>');
-        document.close();
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', inject);
-    } else {
-        inject();
-    }
-    })();
-    "#.to_string()
+</html>"#.to_string()
 }
