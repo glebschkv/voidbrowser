@@ -1,6 +1,7 @@
 # VoidBrowser
 
 **Your browser. Your data. Nobody else's.**
+Made with Claude
 
 A zero-tracking privacy browser for Windows. VoidBrowser collects nothing — no telemetry, no analytics, no accounts, no cloud. The browser binary is the entire product. All user data lives on your machine, encrypted, and dies when you say so.
 
