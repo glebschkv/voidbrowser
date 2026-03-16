@@ -94,6 +94,13 @@ pub fn create_tab_webview<R: Runtime>(
         .on_navigation(move |nav_url| {
             let url_str = nav_url.to_string();
 
+            // Allow void:// internal pages through without any checks.
+            // On Windows, WebView2 rewrites custom protocols to
+            // http://void.newtab/ etc., so match that pattern too.
+            if url_str.starts_with("void://") || url_str.starts_with("http://void.") {
+                return true;
+            }
+
             // ── HTTPS-Only Mode ──────────────────────────────────────
             // Block HTTP navigations and redirect to HTTPS, unless the
             // user has explicitly allowed HTTP for this domain or the
