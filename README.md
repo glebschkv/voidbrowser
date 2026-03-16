@@ -22,7 +22,7 @@ A zero-tracking privacy browser for Windows. VoidBrowser collects nothing — no
 
 ## Download
 
-Download the latest installer from [GitHub Releases](https://github.com/nicosql/voidbrowser/releases).
+Download the latest installer from [GitHub Releases](https://github.com/glebschkv/voidbrowser/releases).
 
 ## Build from source
 
@@ -36,7 +36,7 @@ Download the latest installer from [GitHub Releases](https://github.com/nicosql/
 ### Steps
 
 ```bash
-git clone https://github.com/nicosql/voidbrowser.git
+git clone https://github.com/glebschkv/voidbrowser.git
 cd voidbrowser
 pnpm install
 pnpm tauri build
